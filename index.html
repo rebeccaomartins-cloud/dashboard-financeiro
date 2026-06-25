@@ -44,6 +44,7 @@ th{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercas
 td{padding:9px 14px;font-size:13px;border-bottom:1px solid #FAE8EC;vertical-align:middle}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:#FDEEF2}
+textarea{width:100%;background:#FFF5F7;border:1.5px solid #F2D4DC;border-radius:10px;color:#3A2A30;padding:12px;font-size:12px;font-family:'DM Mono',monospace;resize:vertical;outline:none}
 </style>
 </head>
 <body>
@@ -55,17 +56,6 @@ const waitFb=()=>new Promise(res=>{if(window._fbReady)return res();window.addEve
 const loadAll=async()=>{await waitFb();return window._fbLoad?window._fbLoad():null;};
 const saveAll=async(data)=>{await waitFb();if(window._fbSave)window._fbSave(data);};
 
-// Chama o proxy Netlify em vez da API diretamente
-const callClaude=async(messages)=>{
-  const resp=await fetch("/.netlify/functions/claude",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({messages})
-  });
-  if(!resp.ok){const e=await resp.json().catch(()=>({}));throw new Error(e.error||`HTTP ${resp.status}`);}
-  return resp.json();
-};
-
 const C={bg:"#FDF0F3",surface:"#FFFFFF",surfaceAlt:"#FFF5F7",border:"#F2D4DC",borderLight:"#FAE8EC",accent:"#D96B8A",accentLight:"#F4A7BC",accentPale:"#FDEEF2",green:"#5A9E7C",greenPale:"#EAF5EE",red:"#D96B6B",redPale:"#FDEAEA",yellow:"#C9924A",yellowPale:"#FDF3E7",purple:"#9B7EC8",purplePale:"#F3EDFB",text:"#3A2A30",textMid:"#7A5F68",muted:"#B8969F",white:"#FFFFFF"};
 const MONTHS=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 const BANKS=["Nubank","Itaú","Bradesco","Santander","C6 Bank","Inter","Sicredi","Caixa","BB","XP","Outro"];
@@ -75,6 +65,30 @@ const fmt=v=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).fo
 const fmtDate=d=>{if(!d)return"";return new Date(d+"T12:00:00").toLocaleDateString("pt-BR");};
 const getCiclo=(mi,year)=>{const start=new Date(year,mi,15);const em=mi===11?0:mi+1,ey=mi===11?year+1:year;return{start,end:new Date(ey,em,14)};};
 const dateInCiclo=(ds,mi,year)=>{if(!ds)return false;const d=new Date(ds+"T12:00:00"),{start,end}=getCiclo(mi,year);return d>=start&&d<=end;};
+
+// Parser CSV genérico — tenta detectar data, descrição e valor automaticamente
+const parseCSVLines=(raw)=>{
+  const lines=raw.trim().split("\n").filter(Boolean);
+  const sep=raw.includes(";")?";":",";
+  return lines.map(line=>{
+    const cols=line.split(sep).map(c=>c.trim().replace(/^"|"$/g,""));
+    let data="",descricao="",valor=0;
+    // detecta data
+    for(const c of cols){
+      if(/^\d{2}\/\d{2}\/\d{4}$/.test(c)){const p=c.split("/");data=`${p[2]}-${p[1]}-${p[0]}`;break;}
+      if(/^\d{4}-\d{2}-\d{2}$/.test(c)){data=c;break;}
+    }
+    // detecta valor (último numérico)
+    for(let i=cols.length-1;i>=0;i--){
+      const v=parseFloat(cols[i].replace(/\./g,"").replace(",","."));
+      if(!isNaN(v)&&cols[i].trim()!==""){valor=v;break;}
+    }
+    // detecta descrição (texto mais longo que não é data nem só número)
+    const candidates=cols.filter(c=>c.length>2&&!/^\d{2}\/\d{2}\/\d{4}$/.test(c)&&!/^\d{4}-\d{2}-\d{2}$/.test(c)&&isNaN(parseFloat(c.replace(/\./g,"").replace(",","."))));
+    descricao=candidates.sort((a,b)=>b.length-a.length)[0]||cols[1]||"";
+    return data?{id:Date.now()+Math.random(),data,descricao,valor,categoriaId:""}:null;
+  }).filter(Boolean);
+};
 
 const Card=({children,style={}})=><div style={{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:16,padding:20,...style}}>{children}</div>;
 const Badge=({color,bg,children})=><span style={{display:"inline-block",padding:"2px 9px",borderRadius:99,fontSize:11,fontWeight:700,background:bg||color+"22",color,whiteSpace:"nowrap"}}>{children}</span>;
@@ -109,44 +123,18 @@ function TabMensal({extrato,fatura,orcamentos,categorias,mesSel,setMesSel,ano}){
   return(<div style={{display:"flex",flexDirection:"column",gap:20}}><div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}><Sel value={mesSel} onChange={v=>setMesSel(Number(v))} options={MONTHS.map((m,i)=>({value:i,label:m}))} style={{minWidth:160}}/><div style={{fontSize:12,color:C.muted,fontWeight:600,background:C.accentPale,padding:"6px 12px",borderRadius:8,border:`1px solid ${C.border}`}}>📅 Ciclo conta: {fmtDate(start.toISOString().split("T")[0])} → {fmtDate(end.toISOString().split("T")[0])}</div></div><div style={{display:"flex",gap:14,flexWrap:"wrap"}}><KPI icon="🌱" label="Receita Real" value={fmt(totalRec)} color={C.green}/><KPI icon="📋" label="Despesa Prevista" value={fmt(totalPrev)} color={C.yellow}/><KPI icon="💸" label="Despesa Real" value={fmt(totalReal)} color={C.red}/><KPI icon="✨" label="Diferença" value={fmt(totalPrev-totalReal)} color={totalReal<=totalPrev?C.green:C.red} sub={totalReal<=totalPrev?"dentro do orçamento ✓":"acima do orçamento ✗"}/></div><Card style={{padding:0}}><STitle>🌸 Despesas por Categoria</STitle><table><thead><tr><th>Categoria</th><th>Previsto</th><th>Real</th><th>Diferença</th><th>Progresso</th></tr></thead><tbody>{catD.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:C.muted,padding:28}}>Cadastre categorias na aba Cadastro.</td></tr>}{catD.map(c=>{const key=`${mesSel}_${ano}_${c.id}`,prev=orc[key]||0,real=realPorCat(c.id),diff=prev-real;return<tr key={c.id}><td><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{width:9,height:9,borderRadius:"50%",background:c.cor,display:"inline-block"}}/><span style={{fontWeight:600}}>{c.nome}</span></div></td><td><OrcInput orcKey={key} prev={prev}/></td><td style={{color:C.red,fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(real)}</td><td style={{fontFamily:"'DM Mono',monospace",fontWeight:800,color:diff>=0?C.green:C.red}}>{fmt(diff)}</td><td style={{width:140}}><ProgressBar value={real} max={prev||1} color={c.cor}/></td></tr>;})}</tbody></table></Card><Card style={{padding:0}}><STitle>🌱 Receitas por Categoria</STitle><table><thead><tr><th>Categoria</th><th>Previsto</th><th>Real</th><th>Diferença</th></tr></thead><tbody>{catR.length===0&&<tr><td colSpan={4} style={{textAlign:"center",color:C.muted,padding:28}}>Cadastre categorias de receita.</td></tr>}{catR.map(c=>{const key=`${mesSel}_${ano}_${c.id}`,prev=orc[key]||0,real=realPorCat(c.id);return<tr key={c.id}><td><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{width:9,height:9,borderRadius:"50%",background:c.cor||C.green}}/><span style={{fontWeight:600}}>{c.nome}</span></div></td><td><OrcInput orcKey={key} prev={prev}/></td><td style={{color:C.green,fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(real)}</td><td style={{fontFamily:"'DM Mono',monospace",fontWeight:800,color:real>=prev?C.green:C.red}}>{fmt(real-prev)}</td></tr>;})}</tbody></table></Card></div>);
 }
 
-function usePdfImport(prompt){
-  const[pdfFile,setPdfFile]=useState(null);
-  const[importing,setImporting]=useState(false);
-  const[impMsg,setImpMsg]=useState("");
-  const run=async(onSuccess)=>{
-    if(!pdfFile){setImpMsg("⚠️ Selecione o arquivo PDF.");return;}
-    setImporting(true);setImpMsg("🔍 Lendo o PDF com inteligência artificial…");
-    try{
-      const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=()=>rej(new Error("Falha ao ler o arquivo."));r.readAsDataURL(pdfFile);});
-      const data=await callClaude([{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}]}]);
-      const txt=(data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-      const items=JSON.parse(txt.replace(/```json|```/gi,"").trim());
-      if(!Array.isArray(items)||items.length===0){setImpMsg("⚠️ Nenhum lançamento encontrado.");setImporting(false);return;}
-      onSuccess(items);
-      setImpMsg(`✅ ${items.length} lançamentos importados!`);
-      setPdfFile(null);
-    }catch(err){setImpMsg(`❌ Erro: ${err.message}`);}
-    setImporting(false);
-  };
-  return{pdfFile,setPdfFile,importing,impMsg,setImpMsg,run};
-}
-
-const parseDt=str=>{if(!str)return"";const p=str.split("/");return p.length===3?`${p[2]}-${p[1]}-${p[0]}`:str;};
-
-function PdfUploadUI({pdfFile,setPdfFile,impMsg,importing,onImport,onClose,children}){
+function CsvImportBox({titulo,dica,placeholder,onImport,onClose,extra}){
+  const[csv,setCsv]=useState("");
+  const linhas=csv.trim().split("\n").filter(Boolean).length;
   return(<Card style={{background:C.accentPale,border:`1.5px solid ${C.accentLight}`}}>
-    {children}
-    <div style={{marginBottom:14}}>
-      <label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",display:"block",marginBottom:6}}>Arquivo PDF</label>
-      <label style={{display:"inline-flex",alignItems:"center",gap:10,padding:"10px 18px",background:C.white,border:`2px dashed ${pdfFile?C.green:C.accentLight}`,borderRadius:10,cursor:"pointer",fontSize:13,color:pdfFile?C.green:C.textMid,fontWeight:600}}>
-        {pdfFile?`✅ ${pdfFile.name}`:"📎 Clique para escolher o PDF…"}
-        <input type="file" accept="application/pdf" style={{display:"none"}} onChange={e=>{setPdfFile(e.target.files[0]||null);}}/>
-      </label>
-      {pdfFile&&<button onClick={()=>setPdfFile(null)} style={{marginLeft:8,background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:12}}>✕</button>}
-    </div>
-    {impMsg&&<div style={{fontSize:12,padding:"8px 12px",borderRadius:8,marginBottom:12,fontWeight:600,background:impMsg.startsWith("✅")?C.greenPale:impMsg.startsWith("❌")||impMsg.startsWith("⚠️")?C.redPale:C.purplePale,color:impMsg.startsWith("✅")?C.green:impMsg.startsWith("❌")||impMsg.startsWith("⚠️")?C.red:C.purple}}>{impMsg}</div>}
-    <div style={{display:"flex",gap:8}}>
-      <Btn onClick={onImport} disabled={importing||!pdfFile} variant="success">{importing?"⏳ Processando…":"Importar"}</Btn>
+    <div style={{fontSize:13,fontWeight:800,marginBottom:4}}>{titulo}</div>
+    <div style={{fontSize:12,color:C.textMid,marginBottom:10}}>{dica}</div>
+    {extra}
+    <textarea rows={5} value={csv} onChange={e=>setCsv(e.target.value)} placeholder={placeholder}/>
+    <div style={{display:"flex",gap:8,marginTop:10}}>
+      <Btn onClick={()=>{if(onImport(csv))setCsv("");}} disabled={!csv.trim()} variant="success">
+        Importar {linhas>0?`${linhas} linha${linhas>1?"s":""}`:""}
+      </Btn>
       <Btn onClick={onClose} variant="ghost">Fechar</Btn>
     </div>
   </Card>);
@@ -155,30 +143,42 @@ function PdfUploadUI({pdfFile,setPdfFile,impMsg,importing,onImport,onClose,child
 function TabExtrato({extrato,setExtrato,categorias}){
   const[showImp,setShowImp]=useState(false);
   const[filterCat,setFilter]=useState("");
-  const PROMPT=`Extrato bancário brasileiro em PDF.\nExtraia TODOS os lançamentos individuais. NÃO inclua saldos, totais, cabeçalhos.\nRetorne SOMENTE array JSON puro sem markdown:\n[{"data":"DD/MM/AAAA","descricao":"Descrição","valor":99.90}]\nvalor: positivo=crédito, negativo=débito. Inclua todos.`;
-  const imp=usePdfImport(PROMPT);
+  const[msg,setMsg]=useState("");
+
+  const handleImport=(csv)=>{
+    const novos=parseCSVLines(csv);
+    if(!novos.length){setMsg("⚠️ Nenhuma linha reconhecida. Verifique o formato.");return false;}
+    setExtrato(p=>[...p,...novos]);
+    setMsg(`✅ ${novos.length} lançamentos importados!`);
+    setShowImp(false);
+    return true;
+  };
+
   const upd=(id,f,v)=>setExtrato(p=>p.map(e=>e.id===id?{...e,[f]:f==="valor"?parseFloat(v)||0:v}:e));
   const rem=id=>setExtrato(p=>p.filter(e=>e.id!==id));
   const add=()=>setExtrato(p=>[...p,{id:Date.now(),data:new Date().toISOString().split("T")[0],descricao:"",valor:0,categoriaId:""}]);
   const filtered=filterCat?extrato.filter(e=>e.categoriaId===filterCat):extrato;
   const catOpts=categorias.map(c=>({value:c.id,label:`${c.tipo==="receita"?"↑":"↓"} ${c.nome}`}));
+
   return(<div style={{display:"flex",flexDirection:"column",gap:16}}>
     <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
-      <Btn onClick={()=>{setShowImp(!showImp);imp.setImpMsg("");}}>📄 Importar PDF</Btn>
+      <Btn onClick={()=>{setShowImp(!showImp);setMsg("");}}>📥 Importar CSV</Btn>
       <Btn onClick={add} variant="ghost">+ Linha manual</Btn>
       <Sel value={filterCat} onChange={setFilter} options={catOpts} placeholder="Todas as categorias" style={{minWidth:200}}/>
     </div>
-    {showImp&&<PdfUploadUI pdfFile={imp.pdfFile} setPdfFile={imp.setPdfFile} impMsg={imp.impMsg} importing={imp.importing}
-      onImport={()=>imp.run(items=>setExtrato(p=>[...p,...items.map(it=>({id:Date.now()+Math.random(),data:parseDt(it.data),descricao:String(it.descricao||"").trim(),valor:parseFloat(it.valor)||0,categoriaId:""}))]) )}
-      onClose={()=>{setShowImp(false);imp.setImpMsg("");imp.setPdfFile(null);}}>
-      <div style={{fontSize:13,fontWeight:800,marginBottom:4}}>📄 Importar Extrato Bancário</div>
-      <div style={{fontSize:12,color:C.textMid,marginBottom:14}}>A IA lê o PDF e extrai todos os lançamentos automaticamente.</div>
-    </PdfUploadUI>}
+    {msg&&<div style={{fontSize:12,padding:"8px 12px",borderRadius:8,fontWeight:600,background:msg.startsWith("✅")?C.greenPale:C.redPale,color:msg.startsWith("✅")?C.green:C.red}}>{msg}</div>}
+    {showImp&&<CsvImportBox
+      titulo="📥 Importar Extrato Bancário (CSV)"
+      dica="Cole o CSV exportado pelo seu banco. Separador ; ou , — o sistema detecta data, descrição e valor automaticamente."
+      placeholder={"01/06/2026;Supermercado Extra;-350,00\n15/06/2026;Salário;5000,00\n20/06/2026;Netflix;-55,90"}
+      onImport={handleImport}
+      onClose={()=>setShowImp(false)}
+    />}
     <Card style={{padding:0}}>
       <STitle right={<Badge color={C.accent}>{filtered.length} lançamentos</Badge>}>Extrato da Conta</STitle>
       <div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th>Categoria</th><th></th></tr></thead>
       <tbody>
-        {filtered.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:C.muted,padding:32}}>Importe um PDF ou adicione manualmente.</td></tr>}
+        {filtered.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:C.muted,padding:32}}>Importe um CSV ou adicione manualmente.</td></tr>}
         {filtered.map(e=>(<tr key={e.id}>
           <td><input type="date" value={e.data} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td>
           <td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/></td>
@@ -204,8 +204,18 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
   const[impCartao,setImpCartao]=useState("");
   const[impMes,setImpMes]=useState(new Date().getMonth());
   const[impAno,setImpAno]=useState(anoAtual);
-  const PROMPT=`Fatura de cartão de crédito brasileiro em PDF.\nExtraia TODOS os lançamentos individuais. NÃO inclua total, pagamento mínimo, créditos, encargos, cabeçalhos.\nSIM inclua: cada compra, parcelas (ex: "Loja X 1/3"), estornos (negativo).\nRetorne SOMENTE array JSON puro sem markdown:\n[{"data":"DD/MM/AAAA","descricao":"Nome do estabelecimento","valor":99.90}]\nvalor: positivo=débito, negativo=estorno. Inclua todos.`;
-  const imp=usePdfImport(PROMPT);
+  const[msg,setMsg]=useState("");
+
+  const handleImport=(csv)=>{
+    if(!impCartao){setMsg("⚠️ Selecione o cartão antes de importar.");return false;}
+    const novos=parseCSVLines(csv).map(e=>({...e,valor:-Math.abs(e.valor),cartaoId:impCartao,mes_fatura:impMes,ano_fatura:impAno}));
+    if(!novos.length){setMsg("⚠️ Nenhuma linha reconhecida.");return false;}
+    setFatura(p=>[...p,...novos]);
+    setMsg(`✅ ${novos.length} lançamentos importados para ${MONTHS[impMes]}/${impAno}!`);
+    setShowImp(false);
+    return true;
+  };
+
   const addCartao=()=>{if(!nomeC.trim())return;setCartoes(p=>[...p,{id:Date.now().toString(),nome:nomeC.trim(),banco:bancoC}]);setNomeC("");setShowNovo(false);};
   const remCartao=id=>{setCartoes(p=>p.filter(c=>c.id!==id));setFatura(p=>p.filter(e=>e.cartaoId!==id));};
   const upd=(id,f,v)=>setFatura(p=>p.map(e=>e.id===id?{...e,[f]:f==="valor"?parseFloat(v)||0:v}:e));
@@ -216,27 +226,30 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
   const totalFat=fatFiltrada.reduce((s,e)=>s+Math.abs(e.valor),0);
   const semCat=fatFiltrada.filter(e=>!e.categoriaId).length;
   const resumoCartoes=cartoes.map(c=>{const linhas=(verTodos?fatura:fatura.filter(e=>e.mes_fatura===mesSel&&e.ano_fatura===anoSel)).filter(e=>e.cartaoId===c.id);return{...c,total:linhas.reduce((s,e)=>s+Math.abs(e.valor),0),qtd:linhas.length};});
+
   return(<div style={{display:"flex",flexDirection:"column",gap:16}}>
     <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
       <div style={{display:"flex",background:C.surfaceAlt,borderRadius:10,border:`1.5px solid ${C.border}`,overflow:"hidden"}}>{[false,true].map(v=>(<button key={String(v)} onClick={()=>setVerTodos(v)} style={{padding:"8px 16px",border:"none",fontSize:13,fontWeight:700,cursor:"pointer",background:verTodos===v?C.accent:"transparent",color:verTodos===v?C.white:C.muted}}>{v?"Todos":"Por Fatura"}</button>))}</div>
       {!verTodos&&<><Sel value={mesSel} onChange={v=>setMesSel(Number(v))} options={MONTHS.map((m,i)=>({value:i,label:m}))} style={{minWidth:140}}/><Sel value={anoSel} onChange={v=>setAnoSel(Number(v))} options={anos.map(a=>({value:a,label:String(a)}))} style={{minWidth:90}}/></>}
       <Sel value={cartaoSel} onChange={setCartaoSel} options={[{value:"todos",label:"Todos os cartões"},...cartoes.map(c=>({value:c.id,label:`${c.nome} — ${c.banco}`}))]} style={{minWidth:200}}/>
-      <Btn onClick={()=>{setShowImp(!showImp);imp.setImpMsg("");}}>📄 Importar PDF</Btn>
+      <Btn onClick={()=>{setShowImp(!showImp);setMsg("");}}>📥 Importar CSV</Btn>
       <Btn onClick={add} variant="ghost">+ Linha manual</Btn>
       <Btn onClick={()=>setShowNovo(!showNovo)} variant="soft">+ Novo cartão</Btn>
     </div>
     {showNovo&&(<Card style={{background:C.accentPale,border:`1.5px solid ${C.accentLight}`}}><div style={{fontSize:13,fontWeight:800,marginBottom:12}}>💳 Cadastrar Novo Cartão</div><div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}><Inp label="Nome do cartão" value={nomeC} onChange={setNomeC} placeholder="Ex: Nubank Principal" style={{flex:1,minWidth:160}}/><Sel label="Banco" value={bancoC} onChange={setBancoC} options={BANKS.map(b=>({value:b,label:b}))} style={{minWidth:150}}/><Btn onClick={addCartao}>Cadastrar</Btn><Btn onClick={()=>setShowNovo(false)} variant="ghost">Cancelar</Btn></div></Card>)}
-    {showImp&&<PdfUploadUI pdfFile={imp.pdfFile} setPdfFile={imp.setPdfFile} impMsg={imp.impMsg} importing={imp.importing}
-      onImport={()=>{if(!impCartao){imp.setImpMsg("⚠️ Selecione o cartão antes de importar.");return;}imp.run(items=>setFatura(p=>[...p,...items.map(it=>({id:Date.now()+Math.random(),data:parseDt(it.data),descricao:String(it.descricao||"").trim(),valor:-(Math.abs(parseFloat(it.valor)||0)),categoriaId:"",cartaoId:impCartao,mes_fatura:impMes,ano_fatura:impAno}))]))}}
-      onClose={()=>{setShowImp(false);imp.setImpMsg("");imp.setPdfFile(null);}}>
-      <div style={{fontSize:13,fontWeight:800,marginBottom:4}}>📄 Importar Fatura em PDF</div>
-      <div style={{fontSize:12,color:C.textMid,marginBottom:14}}>A IA lê o PDF. Escolha o <strong>mês da fatura</strong> manualmente.</div>
-      <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end",marginBottom:14}}>
-        <Sel label="Cartão" value={impCartao} onChange={setImpCartao} options={cartoes.map(c=>({value:c.id,label:`${c.nome} — ${c.banco}`}))} placeholder="Selecione o cartão" style={{minWidth:220}}/>
+    {msg&&<div style={{fontSize:12,padding:"8px 12px",borderRadius:8,fontWeight:600,background:msg.startsWith("✅")?C.greenPale:C.redPale,color:msg.startsWith("✅")?C.green:C.red}}>{msg}</div>}
+    {showImp&&<CsvImportBox
+      titulo="📥 Importar Fatura do Cartão (CSV)"
+      dica="Cole o CSV da fatura. O mês da fatura é definido pelos campos abaixo — não pela data dos lançamentos."
+      placeholder={"01/06/2026;iFood;-89,90\n03/06/2026;Uber;-32,50\n10/06/2026;Amazon 1/3;-150,00"}
+      onImport={handleImport}
+      onClose={()=>setShowImp(false)}
+      extra={<div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end",marginBottom:14}}>
+        <Sel label="Cartão" value={impCartao} onChange={setImpCartao} options={cartoes.map(c=>({value:c.id,label:`${c.nome} — ${c.banco}`}))} placeholder="Selecione o cartão" style={{minWidth:200}}/>
         <Sel label="Mês da Fatura" value={impMes} onChange={v=>setImpMes(Number(v))} options={MONTHS.map((m,i)=>({value:i,label:m}))} style={{minWidth:150}}/>
         <Sel label="Ano" value={impAno} onChange={v=>setImpAno(Number(v))} options={anos.map(a=>({value:a,label:String(a)}))} style={{minWidth:90}}/>
-      </div>
-    </PdfUploadUI>}
+      </div>}
+    />}
     {cartoes.length===0&&(<Card style={{background:C.accentPale,border:`1.5px solid ${C.accentLight}`,textAlign:"center",padding:40}}><div style={{fontSize:32,marginBottom:8}}>💳</div><div style={{fontSize:13,fontWeight:700,color:C.textMid,marginBottom:4}}>Nenhum cartão cadastrado</div><div style={{fontSize:12,color:C.muted}}>Clique em "+ Novo cartão" para começar.</div></Card>)}
     <div style={{display:"flex",gap:14,flexWrap:"wrap"}}><KPI icon="💸" label={verTodos?"Total Geral":`Fatura ${MONTHS[mesSel]}/${anoSel}`} value={fmt(totalFat)} color={C.red}/><KPI icon="🏷️" label="Sem categoria" value={semCat} color={semCat>0?C.yellow:C.green} sub={semCat>0?`${semCat} para categorizar`:"tudo categorizado ✓"}/></div>
     {cartoes.length>0&&(<div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{resumoCartoes.map(c=>{const bc=BANK_COLORS[c.banco]||C.accent;return(<div key={c.id} style={{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:14,padding:"14px 18px",flex:1,minWidth:160,position:"relative",overflow:"hidden"}}><div style={{position:"absolute",top:0,left:0,right:0,height:4,background:bc}}/><div style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",marginBottom:4}}>{c.banco}</div><div style={{fontSize:13,fontWeight:800,marginBottom:6}}>{c.nome}</div><div style={{fontSize:20,fontFamily:"'DM Mono',monospace",fontWeight:800,color:C.red}}>{fmt(c.total)}</div><div style={{fontSize:11,color:C.muted,marginTop:3}}>{c.qtd} lançamentos</div><button onClick={()=>remCartao(c.id)} style={{position:"absolute",top:10,right:10,background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13}}>✕</button></div>);})}</div>)}
@@ -244,7 +257,7 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
       <STitle right={<Badge color={C.accent}>{fatFiltrada.length} lançamentos</Badge>}>{verTodos?"Todos os lançamentos":`Fatura ${MONTHS[mesSel]}/${anoSel}`}</STitle>
       <div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th>Cartão</th><th>Fatura</th><th>Categoria</th><th></th></tr></thead>
       <tbody>
-        {fatFiltrada.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:C.muted,padding:32}}>Nenhum lançamento. Importe um PDF ou adicione manualmente.</td></tr>}
+        {fatFiltrada.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:C.muted,padding:32}}>Nenhum lançamento. Importe um CSV ou adicione manualmente.</td></tr>}
         {fatFiltrada.map(e=>{const cart=cartoes.find(c=>c.id===e.cartaoId);const bc=BANK_COLORS[cart?.banco]||C.accent;return(<tr key={e.id}><td><input type="date" value={e.data||""} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td><td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/></td><td><input type="number" value={e.valor} onChange={ev=>upd(e.id,"valor",ev.target.value)} style={{background:"transparent",border:"none",color:C.red,fontSize:13,fontFamily:"'DM Mono',monospace",fontWeight:700,width:110,outline:"none"}}/></td><td>{cart?<Badge color={bc}>{cart.nome}</Badge>:<select value={e.cartaoId||""} onChange={ev=>upd(e.id,"cartaoId",ev.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.muted,padding:"3px 8px",fontSize:12,outline:"none",cursor:"pointer"}}><option value="">— cartão —</option>{cartoes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select>}</td><td style={{fontSize:11,color:C.purple,fontWeight:700,whiteSpace:"nowrap"}}>{e.mes_fatura!==undefined?`${MONTHS[e.mes_fatura].slice(0,3)}/${e.ano_fatura}`:"—"}</td><td><CatSelect value={e.categoriaId} onChange={v=>upd(e.id,"categoriaId",v)} categorias={categorias} tipoFiltro="despesa"/></td><td><button onClick={()=>rem(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button></td></tr>);})}
       </tbody></table></div>
     </Card>
