@@ -66,26 +66,66 @@ const fmtDate=d=>{if(!d)return"";return new Date(d+"T12:00:00").toLocaleDateStri
 const getCiclo=(mi,year)=>{const start=new Date(year,mi,15);const em=mi===11?0:mi+1,ey=mi===11?year+1:year;return{start,end:new Date(ey,em,14)};};
 const dateInCiclo=(ds,mi,year)=>{if(!ds)return false;const d=new Date(ds+"T12:00:00"),{start,end}=getCiclo(mi,year);return d>=start&&d<=end;};
 
-// Parser CSV genérico — tenta detectar data, descrição e valor automaticamente
+// Parser CSV genérico — detecta data, descrição e valor automaticamente
 const parseCSVLines=(raw)=>{
+  const anoAtual=new Date().getFullYear();
   const lines=raw.trim().split("\n").filter(Boolean);
-  const sep=raw.includes(";")?";":",";
+  // detecta separador: se tem vírgula mas o último campo parece valor decimal com ponto, usa vírgula só como sep de campos
+  // heurística: se maioria das linhas tem exatamente 2 vírgulas → sep=","
+  // senão tenta ";"
+  const countChar=(s,c)=>(s.match(new RegExp("\\"+c,"g"))||[]).length;
+  const commas=lines.map(l=>countChar(l,","));
+  const semis=lines.map(l=>countChar(l,";"));
+  const avgComma=commas.reduce((a,b)=>a+b,0)/lines.length;
+  const avgSemi=semis.reduce((a,b)=>a+b,0)/lines.length;
+  // se tem ponto como decimal e vírgula como separador → sep=","
+  // se tem vírgula como decimal e ponto como milhar → sep=";"
+  const hasDotDecimal=lines.some(l=>/\d\.\d{2}(,|$|\r)/.test(l));
+  const sep=(avgSemi>=1)?";":(hasDotDecimal&&avgComma>=1)?",":";";
+
+  const parseVal=(s)=>{
+    if(!s||!s.trim())return null;
+    s=s.trim().replace(/^R\$\s*/,"");
+    // formato: 1.234,56 → usa vírgula como decimal
+    if(/\d,\d{2}$/.test(s)) return parseFloat(s.replace(/\./g,"").replace(",","."));
+    // formato: 1,234.56 ou 123.45 → usa ponto como decimal
+    return parseFloat(s.replace(/,/g,""));
+  };
+
+  const isDate=(s)=>/^\d{1,2}\/\d{1,2}(\/\d{2,4})?$/.test(s)||/^\d{4}-\d{2}-\d{2}$/.test(s);
+  const toIso=(s)=>{
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+    const p=s.split("/");
+    if(p.length===3){const y=p[2].length===2?"20"+p[2]:p[2];return`${y}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`;}
+    if(p.length===2){// DD/MM sem ano — usa ano atual, mas se mês > mês atual provavelmente é ano anterior
+      const m=parseInt(p[1]),mesAtual=new Date().getMonth()+1;
+      const y=m>mesAtual?anoAtual-1:anoAtual;
+      return`${y}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`;
+    }
+    return null;
+  };
+
   return lines.map(line=>{
+    // split respeitando aspas
     const cols=line.split(sep).map(c=>c.trim().replace(/^"|"$/g,""));
     let data="",descricao="",valor=0;
-    // detecta data
-    for(const c of cols){
-      if(/^\d{2}\/\d{2}\/\d{4}$/.test(c)){const p=c.split("/");data=`${p[2]}-${p[1]}-${p[0]}`;break;}
-      if(/^\d{4}-\d{2}-\d{2}$/.test(c)){data=c;break;}
+
+    // encontra data
+    for(const c of cols){if(isDate(c)){const iso=toIso(c);if(iso){data=iso;break;}}}
+
+    // encontra valor: prioriza último campo numérico
+    const numCols=cols.map((c,i)=>({i,v:parseVal(c)})).filter(x=>x.v!==null&&!isNaN(x.v));
+    if(numCols.length>0){
+      // se a data é DD/MM e o separador é vírgula, o último campo numérico é o valor
+      const last=numCols[numCols.length-1];
+      valor=last.v;
     }
-    // detecta valor (último numérico)
-    for(let i=cols.length-1;i>=0;i--){
-      const v=parseFloat(cols[i].replace(/\./g,"").replace(",","."));
-      if(!isNaN(v)&&cols[i].trim()!==""){valor=v;break;}
-    }
-    // detecta descrição (texto mais longo que não é data nem só número)
-    const candidates=cols.filter(c=>c.length>2&&!/^\d{2}\/\d{2}\/\d{4}$/.test(c)&&!/^\d{4}-\d{2}-\d{2}$/.test(c)&&isNaN(parseFloat(c.replace(/\./g,"").replace(",","."))));
-    descricao=candidates.sort((a,b)=>b.length-a.length)[0]||cols[1]||"";
+
+    // encontra descrição: campo mais longo que não é data nem valor
+    const valorIdx=numCols.length>0?numCols[numCols.length-1].i:-1;
+    const desc=cols.filter((c,i)=>!isDate(c)&&i!==valorIdx&&c.length>1);
+    descricao=desc.sort((a,b)=>b.length-a.length)[0]||"";
+
     return data?{id:Date.now()+Math.random(),data,descricao,valor,categoriaId:""}:null;
   }).filter(Boolean);
 };
