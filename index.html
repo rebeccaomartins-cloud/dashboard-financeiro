@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Meu Financeiro 🌸</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  const firebaseConfig = {
+    apiKey: "AIzaSyCGUExdIhHlDWcjoluqsuUXbTxhKIWt0zI",
+    authDomain: "gestao-financeira-86bfd.firebaseapp.com",
+    projectId: "gestao-financeira-86bfd",
+    storageBucket: "gestao-financeira-86bfd.firebasestorage.app",
+    messagingSenderId: "220305154513",
+    appId: "1:220305154513:web:99f66ce834eb1c80bd80f0"
+  };
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const DOC = doc(db, "financeiro", "dados");
+  window._fbLoad = async () => {
+    try { const snap = await getDoc(DOC); return snap.exists() ? snap.data() : null; } catch(e) { return null; }
+  };
+  window._fbSave = async (data) => {
+    try { await setDoc(DOC, data); } catch(e) { console.error(e); }
+  };
+  window._fbReady = true;
+  window.dispatchEvent(new Event("fbready"));
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#FDF0F3;color:#3A2A30;font-family:'Nunito',sans-serif}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:#FDF0F3}
+::-webkit-scrollbar-thumb{background:#F4A7BC;border-radius:99px}
+input,select,textarea,button{font-family:'Nunito',sans-serif}
+input[type=date]::-webkit-calendar-picker-indicator{opacity:.4;cursor:pointer}
+table{border-collapse:collapse;width:100%}
+th{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#B8969F;padding:10px 14px;text-align:left;border-bottom:1.5px solid #F2D4DC}
+td{padding:9px 14px;font-size:13px;border-bottom:1px solid #FAE8EC;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#FDEEF2}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useMemo,useEffect,useRef}=React;
+
+const waitFb=()=>new Promise(res=>{if(window._fbReady)return res();window.addEventListener("fbready",res,{once:true});});
+const loadAll=async()=>{await waitFb();return window._fbLoad?window._fbLoad():null;};
+const saveAll=async(data)=>{await waitFb();if(window._fbSave)window._fbSave(data);};
+
+// Chama o proxy Netlify em vez da API diretamente
+const callClaude=async(messages)=>{
+  const resp=await fetch("/.netlify/functions/claude",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({messages})
+  });
+  if(!resp.ok){const e=await resp.json().catch(()=>({}));throw new Error(e.error||`HTTP ${resp.status}`);}
+  return resp.json();
+};
+
+const C={bg:"#FDF0F3",surface:"#FFFFFF",surfaceAlt:"#FFF5F7",border:"#F2D4DC",borderLight:"#FAE8EC",accent:"#D96B8A",accentLight:"#F4A7BC",accentPale:"#FDEEF2",green:"#5A9E7C",greenPale:"#EAF5EE",red:"#D96B6B",redPale:"#FDEAEA",yellow:"#C9924A",yellowPale:"#FDF3E7",purple:"#9B7EC8",purplePale:"#F3EDFB",text:"#3A2A30",textMid:"#7A5F68",muted:"#B8969F",white:"#FFFFFF"};
+const MONTHS=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+const BANKS=["Nubank","Itaú","Bradesco","Santander","C6 Bank","Inter","Sicredi","Caixa","BB","XP","Outro"];
+const BANK_COLORS={Nubank:"#820AD1",Itaú:"#EC7000","C6 Bank":"#555555",Inter:"#FF6600",Bradesco:"#CC092F",Santander:"#EC0000",Sicredi:"#00925A",Caixa:"#005CA9",BB:"#E8A800",XP:"#222222",Outro:"#D96B8A"};
+
+const fmt=v=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v||0);
+const fmtDate=d=>{if(!d)return"";return new Date(d+"T12:00:00").toLocaleDateString("pt-BR");};
+const getCiclo=(mi,year)=>{const start=new Date(year,mi,15);const em=mi===11?0:mi+1,ey=mi===11?year+1:year;return{start,end:new Date(ey,em,14)};};
+const dateInCiclo=(ds,mi,year)=>{if(!ds)return false;const d=new Date(ds+"T12:00:00"),{start,end}=getCiclo(mi,year);return d>=start&&d<=end;};
+
+const Card=({children,style={}})=><div style={{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:16,padding:20,...style}}>{children}</div>;
+const Badge=({color,bg,children})=><span style={{display:"inline-block",padding:"2px 9px",borderRadius:99,fontSize:11,fontWeight:700,background:bg||color+"22",color,whiteSpace:"nowrap"}}>{children}</span>;
+const STitle=({children,right})=><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px 10px"}}><span style={{fontSize:13,fontWeight:800}}>{children}</span>{right&&<span>{right}</span>}</div>;
+const ProgressBar=({value,max,color})=>{const pct=max>0?Math.min((value/max)*100,100):0;const bc=pct>100?C.red:pct>85?C.yellow:color||C.green;return<div style={{background:C.borderLight,borderRadius:99,height:7,overflow:"hidden",minWidth:80}}><div style={{width:`${Math.max(pct,0)}%`,height:"100%",background:bc,borderRadius:99,transition:"width .4s ease"}}/></div>;};
+const KPI=({label,value,color,sub,icon})=>(<Card style={{flex:1,minWidth:155}}><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>{icon&&<span style={{fontSize:18}}>{icon}</span>}<span style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</span></div><div style={{fontSize:21,fontWeight:800,fontFamily:"'DM Mono',monospace",color:color||C.text,letterSpacing:"-.02em"}}>{value}</div>{sub&&<div style={{fontSize:11,color:C.muted,marginTop:5,fontWeight:500}}>{sub}</div>}</Card>);
+const Btn=({children,onClick,variant="primary",style={},disabled})=>{const vs={primary:{background:`linear-gradient(135deg,${C.accent},${C.accentLight})`,color:C.white,border:"none",boxShadow:"0 2px 8px #D96B8A33"},ghost:{background:C.surfaceAlt,color:C.textMid,border:`1.5px solid ${C.border}`},success:{background:C.greenPale,color:C.green,border:`1.5px solid ${C.green}55`},soft:{background:C.accentPale,color:C.accent,border:`1.5px solid ${C.accentLight}`},danger:{background:C.redPale,color:C.red,border:`1.5px solid ${C.red}55`}};return<button onClick={onClick} disabled={disabled} style={{padding:"8px 16px",borderRadius:10,fontSize:13,fontWeight:700,cursor:disabled?"not-allowed":"pointer",opacity:disabled?0.5:1,display:"inline-flex",alignItems:"center",gap:6,...vs[variant],...style}}>{children}</button>;};
+const Inp=({label,value,onChange,type="text",placeholder,style={}})=>(<div style={{display:"flex",flexDirection:"column",gap:4,...style}}>{label&&<label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</label>}<input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:10,color:C.text,padding:"8px 13px",fontSize:13,outline:"none",fontWeight:500}}/></div>);
+const Sel=({label,value,onChange,options,placeholder,style={}})=>(<div style={{display:"flex",flexDirection:"column",gap:4,...style}}>{label&&<label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</label>}<select value={value} onChange={e=>onChange(e.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:10,color:value?C.text:C.muted,padding:"8px 13px",fontSize:13,outline:"none",fontWeight:500,cursor:"pointer"}}>{placeholder&&<option value="">{placeholder}</option>}{options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></div>);
+const CatSelect=({value,onChange,categorias,tipoFiltro})=>{const cat=categorias.find(c=>c.id===value);const opts=tipoFiltro?categorias.filter(c=>c.tipo===tipoFiltro):categorias;return(<select value={value} onChange={e=>onChange(e.target.value)} style={{background:cat?cat.cor+"22":C.surfaceAlt,border:`1.5px solid ${cat?cat.cor+"88":C.border}`,borderRadius:8,color:cat?cat.cor:C.muted,padding:"3px 10px",fontSize:12,outline:"none",cursor:"pointer",fontWeight:600}}><option value="">— categorizar —</option>{opts.map(c=><option key={c.id} value={c.id}>{c.tipo==="receita"?"↑":"↓"} {c.nome}</option>)}</select>);};
+
+function TabAnual({extrato,fatura,orcamentos,categorias,saldoAtual,ano}){
+  const meses=MONTHS.map((nome,mi)=>{const ext=extrato.filter(e=>dateInCiclo(e.data,mi,ano));const fat=fatura.filter(e=>e.mes_fatura===mi&&e.ano_fatura===ano);const todas=[...ext,...fat];const receitas=todas.filter(e=>categorias.find(c=>c.id===e.categoriaId)?.tipo==="receita").reduce((s,e)=>s+Math.abs(e.valor),0);const despesas=todas.filter(e=>{const c=categorias.find(c=>c.id===e.categoriaId);return!c||c.tipo==="despesa";}).reduce((s,e)=>s+Math.abs(e.valor),0);return{nome,mi,receitas,despesas,saldo:receitas-despesas};});
+  const totalR=meses.reduce((s,m)=>s+m.receitas,0),totalD=meses.reduce((s,m)=>s+m.despesas,0);
+  const maxR=Math.max(...meses.map(m=>m.receitas),1),maxD=Math.max(...meses.map(m=>m.despesas),1);
+  return(<div style={{display:"flex",flexDirection:"column",gap:20}}><div style={{display:"flex",gap:14,flexWrap:"wrap"}}><KPI icon="💰" label="Saldo Atual" value={fmt(saldoAtual)} color={saldoAtual>=0?C.green:C.red}/><KPI icon="🌱" label={`Receitas ${ano}`} value={fmt(totalR)} color={C.green}/><KPI icon="🌸" label={`Despesas ${ano}`} value={fmt(totalD)} color={C.red}/><KPI icon="✨" label={`Resultado ${ano}`} value={fmt(totalR-totalD)} color={totalR>=totalD?C.green:C.red} sub={totalR>=totalD?"no azul ✓":"no vermelho ✗"}/></div><Card><div style={{fontSize:13,fontWeight:800,marginBottom:18}}>Receitas × Despesas — {ano}</div><div style={{display:"flex",gap:4,alignItems:"flex-end",height:130}}>{meses.map((m,i)=>{const rp=Math.max((m.receitas/maxR)*100,2),dp=Math.max((m.despesas/maxD)*100,2);return(<div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}><div style={{display:"flex",gap:2,alignItems:"flex-end",height:110,width:"100%"}}><div style={{flex:1,background:C.green,borderRadius:"4px 4px 0 0",height:`${rp}%`}}/><div style={{flex:1,background:C.accent,borderRadius:"4px 4px 0 0",height:`${dp}%`}}/></div><div style={{fontSize:8.5,color:C.muted,fontWeight:600}}>{m.nome.slice(0,3).toUpperCase()}</div></div>);})}</div><div style={{display:"flex",gap:16,marginTop:10}}>{[[C.green,"Receita"],[C.accent,"Despesa"]].map(([cor,lbl])=>(<div key={lbl} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.textMid}}><span style={{width:10,height:10,borderRadius:2,background:cor,display:"inline-block"}}/>{lbl}</div>))}</div></Card><Card style={{padding:0}}><STitle>Resumo por Mês</STitle><table><thead><tr><th>Mês</th><th>Receitas</th><th>Despesas</th><th>Resultado</th><th>Uso do orçamento</th></tr></thead><tbody>{meses.map((m,i)=>(<tr key={i}><td style={{fontWeight:700}}>{m.nome}</td><td style={{color:C.green,fontFamily:"'DM Mono',monospace",fontWeight:600}}>{fmt(m.receitas)}</td><td style={{color:C.red,fontFamily:"'DM Mono',monospace",fontWeight:600}}>{fmt(m.despesas)}</td><td style={{fontFamily:"'DM Mono',monospace",fontWeight:800,color:m.saldo>=0?C.green:C.red}}>{fmt(m.saldo)}</td><td style={{width:160}}><ProgressBar value={m.despesas} max={m.receitas||1}/></td></tr>))}</tbody></table></Card></div>);
+}
+
+function TabMensal({extrato,fatura,orcamentos,categorias,mesSel,setMesSel,ano}){
+  const orc=orcamentos.data,upd=orcamentos.update;
+  const{start,end}=getCiclo(mesSel,ano);
+  const ext=extrato.filter(e=>dateInCiclo(e.data,mesSel,ano));
+  const fat=fatura.filter(e=>e.mes_fatura===mesSel&&e.ano_fatura===ano);
+  const todas=[...ext,...fat];
+  const catD=categorias.filter(c=>c.tipo==="despesa");
+  const catR=categorias.filter(c=>c.tipo==="receita");
+  const realPorCat=id=>todas.filter(e=>e.categoriaId===id).reduce((s,e)=>s+Math.abs(e.valor),0);
+  const totalPrev=catD.reduce((s,c)=>s+(orc[`${mesSel}_${ano}_${c.id}`]||0),0);
+  const totalReal=catD.reduce((s,c)=>s+realPorCat(c.id),0);
+  const totalRec=catR.reduce((s,c)=>s+realPorCat(c.id),0);
+  const OrcInput=({orcKey,prev})=>(<input type="number" value={prev||""} placeholder="—" onChange={e=>upd(orcKey,parseFloat(e.target.value)||0)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.text,padding:"4px 8px",fontSize:12,width:100,fontFamily:"'DM Mono',monospace",outline:"none",fontWeight:600}}/>);
+  return(<div style={{display:"flex",flexDirection:"column",gap:20}}><div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}><Sel value={mesSel} onChange={v=>setMesSel(Number(v))} options={MONTHS.map((m,i)=>({value:i,label:m}))} style={{minWidth:160}}/><div style={{fontSize:12,color:C.muted,fontWeight:600,background:C.accentPale,padding:"6px 12px",borderRadius:8,border:`1px solid ${C.border}`}}>📅 Ciclo conta: {fmtDate(start.toISOString().split("T")[0])} → {fmtDate(end.toISOString().split("T")[0])}</div></div><div style={{display:"flex",gap:14,flexWrap:"wrap"}}><KPI icon="🌱" label="Receita Real" value={fmt(totalRec)} color={C.green}/><KPI icon="📋" label="Despesa Prevista" value={fmt(totalPrev)} color={C.yellow}/><KPI icon="💸" label="Despesa Real" value={fmt(totalReal)} color={C.red}/><KPI icon="✨" label="Diferença" value={fmt(totalPrev-totalReal)} color={totalReal<=totalPrev?C.green:C.red} sub={totalReal<=totalPrev?"dentro do orçamento ✓":"acima do orçamento ✗"}/></div><Card style={{padding:0}}><STitle>🌸 Despesas por Categoria</STitle><table><thead><tr><th>Categoria</th><th>Previsto</th><th>Real</th><th>Diferença</th><th>Progresso</th></tr></thead><tbody>{catD.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:C.muted,padding:28}}>Cadastre categorias na aba Cadastro.</td></tr>}{catD.map(c=>{const key=`${mesSel}_${ano}_${c.id}`,prev=orc[key]||0,real=realPorCat(c.id),diff=prev-real;return<tr key={c.id}><td><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{width:9,height:9,borderRadius:"50%",background:c.cor,display:"inline-block"}}/><span style={{fontWeight:600}}>{c.nome}</span></div></td><td><OrcInput orcKey={key} prev={prev}/></td><td style={{color:C.red,fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(real)}</td><td style={{fontFamily:"'DM Mono',monospace",fontWeight:800,color:diff>=0?C.green:C.red}}>{fmt(diff)}</td><td style={{width:140}}><ProgressBar value={real} max={prev||1} color={c.cor}/></td></tr>;})}</tbody></table></Card><Card style={{padding:0}}><STitle>🌱 Receitas por Categoria</STitle><table><thead><tr><th>Categoria</th><th>Previsto</th><th>Real</th><th>Diferença</th></tr></thead><tbody>{catR.length===0&&<tr><td colSpan={4} style={{textAlign:"center",color:C.muted,padding:28}}>Cadastre categorias de receita.</td></tr>}{catR.map(c=>{const key=`${mesSel}_${ano}_${c.id}`,prev=orc[key]||0,real=realPorCat(c.id);return<tr key={c.id}><td><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{width:9,height:9,borderRadius:"50%",background:c.cor||C.green}}/><span style={{fontWeight:600}}>{c.nome}</span></div></td><td><OrcInput orcKey={key} prev={prev}/></td><td style={{color:C.green,fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(real)}</td><td style={{fontFamily:"'DM Mono',monospace",fontWeight:800,color:real>=prev?C.green:C.red}}>{fmt(real-prev)}</td></tr>;})}</tbody></table></Card></div>);
+}
+
+function usePdfImport(prompt){
+  const[pdfFile,setPdfFile]=useState(null);
+  const[importing,setImporting]=useState(false);
+  const[impMsg,setImpMsg]=useState("");
+  const run=async(onSuccess)=>{
+    if(!pdfFile){setImpMsg("⚠️ Selecione o arquivo PDF.");return;}
+    setImporting(true);setImpMsg("🔍 Lendo o PDF com inteligência artificial…");
+    try{
+      const base64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=()=>rej(new Error("Falha ao ler o arquivo."));r.readAsDataURL(pdfFile);});
+      const data=await callClaude([{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},{type:"text",text:prompt}]}]);
+      const txt=(data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
+      const items=JSON.parse(txt.replace(/```json|```/gi,"").trim());
+      if(!Array.isArray(items)||items.length===0){setImpMsg("⚠️ Nenhum lançamento encontrado.");setImporting(false);return;}
+      onSuccess(items);
+      setImpMsg(`✅ ${items.length} lançamentos importados!`);
+      setPdfFile(null);
+    }catch(err){setImpMsg(`❌ Erro: ${err.message}`);}
+    setImporting(false);
+  };
+  return{pdfFile,setPdfFile,importing,impMsg,setImpMsg,run};
+}
+
+const parseDt=str=>{if(!str)return"";const p=str.split("/");return p.length===3?`${p[2]}-${p[1]}-${p[0]}`:str;};
+
+function PdfUploadUI({pdfFile,setPdfFile,impMsg,importing,onImport,onClose,children}){
+  return(<Card style={{background:C.accentPale,border:`1.5px solid ${C.accentLight}`}}>
+    {children}
+    <div style={{marginBottom:14}}>
+      <label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",display:"block",marginBottom:6}}>Arquivo PDF</label>
+      <label style={{display:"inline-flex",alignItems:"center",gap:10,padding:"10px 18px",background:C.white,border:`2px dashed ${pdfFile?C.green:C.accentLight}`,borderRadius:10,cursor:"pointer",fontSize:13,color:pdfFile?C.green:C.textMid,fontWeight:600}}>
+        {pdfFile?`✅ ${pdfFile.name}`:"📎 Clique para escolher o PDF…"}
+        <input type="file" accept="application/pdf" style={{display:"none"}} onChange={e=>{setPdfFile(e.target.files[0]||null);}}/>
+      </label>
+      {pdfFile&&<button onClick={()=>setPdfFile(null)} style={{marginLeft:8,background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:12}}>✕</button>}
+    </div>
+    {impMsg&&<div style={{fontSize:12,padding:"8px 12px",borderRadius:8,marginBottom:12,fontWeight:600,background:impMsg.startsWith("✅")?C.greenPale:impMsg.startsWith("❌")||impMsg.startsWith("⚠️")?C.redPale:C.purplePale,color:impMsg.startsWith("✅")?C.green:impMsg.startsWith("❌")||impMsg.startsWith("⚠️")?C.red:C.purple}}>{impMsg}</div>}
+    <div style={{display:"flex",gap:8}}>
+      <Btn onClick={onImport} disabled={importing||!pdfFile} variant="success">{importing?"⏳ Processando…":"Importar"}</Btn>
+      <Btn onClick={onClose} variant="ghost">Fechar</Btn>
+    </div>
+  </Card>);
+}
+
+function TabExtrato({extrato,setExtrato,categorias}){
+  const[showImp,setShowImp]=useState(false);
+  const[filterCat,setFilter]=useState("");
+  const PROMPT=`Extrato bancário brasileiro em PDF.\nExtraia TODOS os lançamentos individuais. NÃO inclua saldos, totais, cabeçalhos.\nRetorne SOMENTE array JSON puro sem markdown:\n[{"data":"DD/MM/AAAA","descricao":"Descrição","valor":99.90}]\nvalor: positivo=crédito, negativo=débito. Inclua todos.`;
+  const imp=usePdfImport(PROMPT);
+  const upd=(id,f,v)=>setExtrato(p=>p.map(e=>e.id===id?{...e,[f]:f==="valor"?parseFloat(v)||0:v}:e));
+  const rem=id=>setExtrato(p=>p.filter(e=>e.id!==id));
+  const add=()=>setExtrato(p=>[...p,{id:Date.now(),data:new Date().toISOString().split("T")[0],descricao:"",valor:0,categoriaId:""}]);
+  const filtered=filterCat?extrato.filter(e=>e.categoriaId===filterCat):extrato;
+  const catOpts=categorias.map(c=>({value:c.id,label:`${c.tipo==="receita"?"↑":"↓"} ${c.nome}`}));
+  return(<div style={{display:"flex",flexDirection:"column",gap:16}}>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+      <Btn onClick={()=>{setShowImp(!showImp);imp.setImpMsg("");}}>📄 Importar PDF</Btn>
+      <Btn onClick={add} variant="ghost">+ Linha manual</Btn>
+      <Sel value={filterCat} onChange={setFilter} options={catOpts} placeholder="Todas as categorias" style={{minWidth:200}}/>
+    </div>
+    {showImp&&<PdfUploadUI pdfFile={imp.pdfFile} setPdfFile={imp.setPdfFile} impMsg={imp.impMsg} importing={imp.importing}
+      onImport={()=>imp.run(items=>setExtrato(p=>[...p,...items.map(it=>({id:Date.now()+Math.random(),data:parseDt(it.data),descricao:String(it.descricao||"").trim(),valor:parseFloat(it.valor)||0,categoriaId:""}))]) )}
+      onClose={()=>{setShowImp(false);imp.setImpMsg("");imp.setPdfFile(null);}}>
+      <div style={{fontSize:13,fontWeight:800,marginBottom:4}}>📄 Importar Extrato Bancário</div>
+      <div style={{fontSize:12,color:C.textMid,marginBottom:14}}>A IA lê o PDF e extrai todos os lançamentos automaticamente.</div>
+    </PdfUploadUI>}
+    <Card style={{padding:0}}>
+      <STitle right={<Badge color={C.accent}>{filtered.length} lançamentos</Badge>}>Extrato da Conta</STitle>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th>Categoria</th><th></th></tr></thead>
+      <tbody>
+        {filtered.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:C.muted,padding:32}}>Importe um PDF ou adicione manualmente.</td></tr>}
+        {filtered.map(e=>(<tr key={e.id}>
+          <td><input type="date" value={e.data} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td>
+          <td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/></td>
+          <td><input type="number" value={e.valor} onChange={ev=>upd(e.id,"valor",ev.target.value)} style={{background:"transparent",border:"none",outline:"none",color:e.valor>=0?C.green:C.red,fontSize:13,fontFamily:"'DM Mono',monospace",fontWeight:700,width:110}}/></td>
+          <td><CatSelect value={e.categoriaId} onChange={v=>upd(e.id,"categoriaId",v)} categorias={categorias}/></td>
+          <td><button onClick={()=>rem(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button></td>
+        </tr>))}
+      </tbody></table></div>
+    </Card>
+  </div>);
+}
+
+function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
+  const anoAtual=new Date().getFullYear();
+  const[mesSel,setMesSel]=useState(new Date().getMonth());
+  const[anoSel,setAnoSel]=useState(anoAtual);
+  const[verTodos,setVerTodos]=useState(false);
+  const[cartaoSel,setCartaoSel]=useState("todos");
+  const[showNovo,setShowNovo]=useState(false);
+  const[nomeC,setNomeC]=useState("");
+  const[bancoC,setBancoC]=useState("Nubank");
+  const[showImp,setShowImp]=useState(false);
+  const[impCartao,setImpCartao]=useState("");
+  const[impMes,setImpMes]=useState(new Date().getMonth());
+  const[impAno,setImpAno]=useState(anoAtual);
+  const PROMPT=`Fatura de cartão de crédito brasileiro em PDF.\nExtraia TODOS os lançamentos individuais. NÃO inclua total, pagamento mínimo, créditos, encargos, cabeçalhos.\nSIM inclua: cada compra, parcelas (ex: "Loja X 1/3"), estornos (negativo).\nRetorne SOMENTE array JSON puro sem markdown:\n[{"data":"DD/MM/AAAA","descricao":"Nome do estabelecimento","valor":99.90}]\nvalor: positivo=débito, negativo=estorno. Inclua todos.`;
+  const imp=usePdfImport(PROMPT);
+  const addCartao=()=>{if(!nomeC.trim())return;setCartoes(p=>[...p,{id:Date.now().toString(),nome:nomeC.trim(),banco:bancoC}]);setNomeC("");setShowNovo(false);};
+  const remCartao=id=>{setCartoes(p=>p.filter(c=>c.id!==id));setFatura(p=>p.filter(e=>e.cartaoId!==id));};
+  const upd=(id,f,v)=>setFatura(p=>p.map(e=>e.id===id?{...e,[f]:f==="valor"?parseFloat(v)||0:v}:e));
+  const rem=id=>setFatura(p=>p.filter(e=>e.id!==id));
+  const add=()=>setFatura(p=>[...p,{id:Date.now(),data:new Date().toISOString().split("T")[0],descricao:"",valor:0,categoriaId:"",cartaoId:cartaoSel!=="todos"?cartaoSel:"",mes_fatura:mesSel,ano_fatura:anoSel}]);
+  const anos=Array.from({length:3},(_,i)=>anoAtual-1+i);
+  const fatFiltrada=useMemo(()=>{let f=verTodos?fatura:fatura.filter(e=>e.mes_fatura===mesSel&&e.ano_fatura===anoSel);if(cartaoSel!=="todos")f=f.filter(e=>e.cartaoId===cartaoSel);return f;},[fatura,cartaoSel,mesSel,anoSel,verTodos]);
+  const totalFat=fatFiltrada.reduce((s,e)=>s+Math.abs(e.valor),0);
+  const semCat=fatFiltrada.filter(e=>!e.categoriaId).length;
+  const resumoCartoes=cartoes.map(c=>{const linhas=(verTodos?fatura:fatura.filter(e=>e.mes_fatura===mesSel&&e.ano_fatura===anoSel)).filter(e=>e.cartaoId===c.id);return{...c,total:linhas.reduce((s,e)=>s+Math.abs(e.valor),0),qtd:linhas.length};});
+  return(<div style={{display:"flex",flexDirection:"column",gap:16}}>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+      <div style={{display:"flex",background:C.surfaceAlt,borderRadius:10,border:`1.5px solid ${C.border}`,overflow:"hidden"}}>{[false,true].map(v=>(<button key={String(v)} onClick={()=>setVerTodos(v)} style={{padding:"8px 16px",border:"none",fontSize:13,fontWeight:700,cursor:"pointer",background:verTodos===v?C.accent:"transparent",color:verTodos===v?C.white:C.muted}}>{v?"Todos":"Por Fatura"}</button>))}</div>
+      {!verTodos&&<><Sel value={mesSel} onChange={v=>setMesSel(Number(v))} options={MONTHS.map((m,i)=>({value:i,label:m}))} style={{minWidth:140}}/><Sel value={anoSel} onChange={v=>setAnoSel(Number(v))} options={anos.map(a=>({value:a,label:String(a)}))} style={{minWidth:90}}/></>}
+      <Sel value={cartaoSel} onChange={setCartaoSel} options={[{value:"todos",label:"Todos os cartões"},...cartoes.map(c=>({value:c.id,label:`${c.nome} — ${c.banco}`}))]} style={{minWidth:200}}/>
+      <Btn onClick={()=>{setShowImp(!showImp);imp.setImpMsg("");}}>📄 Importar PDF</Btn>
+      <Btn onClick={add} variant="ghost">+ Linha manual</Btn>
+      <Btn onClick={()=>setShowNovo(!showNovo)} variant="soft">+ Novo cartão</Btn>
+    </div>
+    {showNovo&&(<Card style={{background:C.accentPale,border:`1.5px solid ${C.accentLight}`}}><div style={{fontSize:13,fontWeight:800,marginBottom:12}}>💳 Cadastrar Novo Cartão</div><div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}><Inp label="Nome do cartão" value={nomeC} onChange={setNomeC} placeholder="Ex: Nubank Principal" style={{flex:1,minWidth:160}}/><Sel label="Banco" value={bancoC} onChange={setBancoC} options={BANKS.map(b=>({value:b,label:b}))} style={{minWidth:150}}/><Btn onClick={addCartao}>Cadastrar</Btn><Btn onClick={()=>setShowNovo(false)} variant="ghost">Cancelar</Btn></div></Card>)}
+    {showImp&&<PdfUploadUI pdfFile={imp.pdfFile} setPdfFile={imp.setPdfFile} impMsg={imp.impMsg} importing={imp.importing}
+      onImport={()=>{if(!impCartao){imp.setImpMsg("⚠️ Selecione o cartão antes de importar.");return;}imp.run(items=>setFatura(p=>[...p,...items.map(it=>({id:Date.now()+Math.random(),data:parseDt(it.data),descricao:String(it.descricao||"").trim(),valor:-(Math.abs(parseFloat(it.valor)||0)),categoriaId:"",cartaoId:impCartao,mes_fatura:impMes,ano_fatura:impAno}))]))}}
+      onClose={()=>{setShowImp(false);imp.setImpMsg("");imp.setPdfFile(null);}}>
+      <div style={{fontSize:13,fontWeight:800,marginBottom:4}}>📄 Importar Fatura em PDF</div>
+      <div style={{fontSize:12,color:C.textMid,marginBottom:14}}>A IA lê o PDF. Escolha o <strong>mês da fatura</strong> manualmente.</div>
+      <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end",marginBottom:14}}>
+        <Sel label="Cartão" value={impCartao} onChange={setImpCartao} options={cartoes.map(c=>({value:c.id,label:`${c.nome} — ${c.banco}`}))} placeholder="Selecione o cartão" style={{minWidth:220}}/>
+        <Sel label="Mês da Fatura" value={impMes} onChange={v=>setImpMes(Number(v))} options={MONTHS.map((m,i)=>({value:i,label:m}))} style={{minWidth:150}}/>
+        <Sel label="Ano" value={impAno} onChange={v=>setImpAno(Number(v))} options={anos.map(a=>({value:a,label:String(a)}))} style={{minWidth:90}}/>
+      </div>
+    </PdfUploadUI>}
+    {cartoes.length===0&&(<Card style={{background:C.accentPale,border:`1.5px solid ${C.accentLight}`,textAlign:"center",padding:40}}><div style={{fontSize:32,marginBottom:8}}>💳</div><div style={{fontSize:13,fontWeight:700,color:C.textMid,marginBottom:4}}>Nenhum cartão cadastrado</div><div style={{fontSize:12,color:C.muted}}>Clique em "+ Novo cartão" para começar.</div></Card>)}
+    <div style={{display:"flex",gap:14,flexWrap:"wrap"}}><KPI icon="💸" label={verTodos?"Total Geral":`Fatura ${MONTHS[mesSel]}/${anoSel}`} value={fmt(totalFat)} color={C.red}/><KPI icon="🏷️" label="Sem categoria" value={semCat} color={semCat>0?C.yellow:C.green} sub={semCat>0?`${semCat} para categorizar`:"tudo categorizado ✓"}/></div>
+    {cartoes.length>0&&(<div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{resumoCartoes.map(c=>{const bc=BANK_COLORS[c.banco]||C.accent;return(<div key={c.id} style={{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:14,padding:"14px 18px",flex:1,minWidth:160,position:"relative",overflow:"hidden"}}><div style={{position:"absolute",top:0,left:0,right:0,height:4,background:bc}}/><div style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",marginBottom:4}}>{c.banco}</div><div style={{fontSize:13,fontWeight:800,marginBottom:6}}>{c.nome}</div><div style={{fontSize:20,fontFamily:"'DM Mono',monospace",fontWeight:800,color:C.red}}>{fmt(c.total)}</div><div style={{fontSize:11,color:C.muted,marginTop:3}}>{c.qtd} lançamentos</div><button onClick={()=>remCartao(c.id)} style={{position:"absolute",top:10,right:10,background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13}}>✕</button></div>);})}</div>)}
+    <Card style={{padding:0}}>
+      <STitle right={<Badge color={C.accent}>{fatFiltrada.length} lançamentos</Badge>}>{verTodos?"Todos os lançamentos":`Fatura ${MONTHS[mesSel]}/${anoSel}`}</STitle>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th>Cartão</th><th>Fatura</th><th>Categoria</th><th></th></tr></thead>
+      <tbody>
+        {fatFiltrada.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:C.muted,padding:32}}>Nenhum lançamento. Importe um PDF ou adicione manualmente.</td></tr>}
+        {fatFiltrada.map(e=>{const cart=cartoes.find(c=>c.id===e.cartaoId);const bc=BANK_COLORS[cart?.banco]||C.accent;return(<tr key={e.id}><td><input type="date" value={e.data||""} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td><td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/></td><td><input type="number" value={e.valor} onChange={ev=>upd(e.id,"valor",ev.target.value)} style={{background:"transparent",border:"none",color:C.red,fontSize:13,fontFamily:"'DM Mono',monospace",fontWeight:700,width:110,outline:"none"}}/></td><td>{cart?<Badge color={bc}>{cart.nome}</Badge>:<select value={e.cartaoId||""} onChange={ev=>upd(e.id,"cartaoId",ev.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.muted,padding:"3px 8px",fontSize:12,outline:"none",cursor:"pointer"}}><option value="">— cartão —</option>{cartoes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select>}</td><td style={{fontSize:11,color:C.purple,fontWeight:700,whiteSpace:"nowrap"}}>{e.mes_fatura!==undefined?`${MONTHS[e.mes_fatura].slice(0,3)}/${e.ano_fatura}`:"—"}</td><td><CatSelect value={e.categoriaId} onChange={v=>upd(e.id,"categoriaId",v)} categorias={categorias} tipoFiltro="despesa"/></td><td><button onClick={()=>rem(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button></td></tr>);})}
+      </tbody></table></div>
+    </Card>
+  </div>);
+}
+
+function TabCadastro({categorias,setCategorias,saldoAtual,setSaldoAtual}){
+  const[nome,setNome]=useState(""),[ tipo,setTipo]=useState("despesa"),[cor,setCor]=useState("#D96B8A");
+  const CORES=["#D96B8A","#F4A7BC","#9B7EC8","#5A9E7C","#C9924A","#56CCF2","#D96B6B","#B8969F","#7DBFAD","#E8A598"];
+  const add=()=>{if(!nome.trim())return;setCategorias(p=>[...p,{id:Date.now().toString(),nome:nome.trim(),tipo,cor}]);setNome("");};
+  const rem=id=>setCategorias(p=>p.filter(c=>c.id!==id));
+  return(<div style={{display:"flex",flexDirection:"column",gap:20,maxWidth:720}}>
+    <Card style={{background:`linear-gradient(135deg,${C.accentPale},${C.purplePale})`,border:`1.5px solid ${C.accentLight}`}}><div style={{fontSize:14,fontWeight:800,marginBottom:14}}>💰 Saldo Atual da Conta</div><div style={{display:"flex",gap:14,alignItems:"flex-end",flexWrap:"wrap"}}><Inp label="Informe o saldo (R$)" type="number" value={saldoAtual} onChange={v=>setSaldoAtual(parseFloat(v)||0)} placeholder="0,00" style={{flex:1,minWidth:180}}/><div style={{fontSize:26,fontWeight:800,fontFamily:"'DM Mono',monospace",color:saldoAtual>=0?C.green:C.red,paddingBottom:2}}>{fmt(saldoAtual)}</div></div></Card>
+    <Card><div style={{fontSize:14,fontWeight:800,marginBottom:14}}>🏷️ Nova Categoria</div><div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}><Inp label="Nome" value={nome} onChange={setNome} placeholder="Ex: Alimentação" style={{flex:2,minWidth:160}}/><Sel label="Tipo" value={tipo} onChange={setTipo} options={[{value:"despesa",label:"↓ Despesa"},{value:"receita",label:"↑ Receita"}]} style={{flex:1,minWidth:130}}/><div style={{display:"flex",flexDirection:"column",gap:4}}><label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>Cor</label><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{CORES.map(c=><div key={c} onClick={()=>setCor(c)} style={{width:22,height:22,borderRadius:"50%",background:c,cursor:"pointer",border:cor===c?`3px solid ${C.text}`:"3px solid transparent",boxShadow:cor===c?"0 0 0 1.5px white inset":"none"}}/>)}</div></div><Btn onClick={add}>Adicionar</Btn></div></Card>
+    {["receita","despesa"].map(t=>{const cats=categorias.filter(c=>c.tipo===t);return(<Card key={t} style={{padding:0}}><STitle right={<Badge color={t==="receita"?C.green:C.red}>{cats.length}</Badge>}>{t==="receita"?"🌱 Categorias de Receita":"🌸 Categorias de Despesa"}</STitle>{cats.length===0?<div style={{padding:"16px 18px",color:C.muted,fontSize:13}}>Nenhuma categoria cadastrada.</div>:<table><thead><tr><th>Cor</th><th>Nome</th><th>Tipo</th><th></th></tr></thead><tbody>{cats.map(c=>(<tr key={c.id}><td><span style={{display:"inline-block",width:13,height:13,borderRadius:"50%",background:c.cor}}/></td><td style={{fontWeight:700}}>{c.nome}</td><td><Badge color={t==="receita"?C.green:C.red} bg={t==="receita"?C.greenPale:C.redPale}>{c.tipo}</Badge></td><td><button onClick={()=>rem(c.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13,fontWeight:600}}>✕ remover</button></td></tr>))}</tbody></table>}</Card>);})}
+  </div>);
+}
+
+const TABS=[{id:"anual",label:"📅 Anual"},{id:"mensal",label:"📊 Mensal"},{id:"extrato",label:"🏦 Extrato"},{id:"cartao",label:"💳 Cartão"},{id:"cadastro",label:"⚙️ Cadastro"}];
+const DEFAULT_CATS=[{id:"1",nome:"Salário",tipo:"receita",cor:"#5A9E7C"},{id:"2",nome:"Freelance",tipo:"receita",cor:"#9B7EC8"},{id:"3",nome:"Alimentação",tipo:"despesa",cor:"#C9924A"},{id:"4",nome:"Moradia",tipo:"despesa",cor:"#D96B8A"},{id:"5",nome:"Transporte",tipo:"despesa",cor:"#7DBFAD"},{id:"6",nome:"Saúde",tipo:"despesa",cor:"#D96B6B"},{id:"7",nome:"Lazer",tipo:"despesa",cor:"#B8969F"}];
+
+function App(){
+  const[loaded,setLoaded]=useState(false);
+  const[syncStatus,setSyncStatus]=useState("carregando");
+  const[tab,setTab]=useState("anual");
+  const[categorias,setCategorias]=useState(DEFAULT_CATS);
+  const[cartoes,setCartoes]=useState([]);
+  const[extrato,setExtrato]=useState([]);
+  const[fatura,setFatura]=useState([]);
+  const[orcData,setOrcData]=useState({});
+  const[saldoAtual,setSaldoAtual]=useState(0);
+  const[mesSel,setMesSel]=useState(new Date().getMonth());
+  const ano=new Date().getFullYear();
+  const saveTimer=useRef(null);
+
+  useEffect(()=>{
+    loadAll().then(saved=>{
+      if(saved){
+        if(saved.categorias)setCategorias(saved.categorias);
+        if(saved.cartoes)setCartoes(saved.cartoes);
+        if(saved.extrato)setExtrato(saved.extrato);
+        if(saved.fatura)setFatura(saved.fatura);
+        if(saved.orcData)setOrcData(saved.orcData);
+        if(saved.saldoAtual!==undefined)setSaldoAtual(saved.saldoAtual);
+      }
+      setLoaded(true);setSyncStatus("ok");
+    }).catch(()=>{setLoaded(true);setSyncStatus("erro");});
+  },[]);
+
+  useEffect(()=>{
+    if(!loaded)return;
+    setSyncStatus("salvando");
+    clearTimeout(saveTimer.current);
+    saveTimer.current=setTimeout(()=>{
+      saveAll({categorias,cartoes,extrato,fatura,orcData,saldoAtual}).then(()=>setSyncStatus("ok")).catch(()=>setSyncStatus("erro"));
+    },1200);
+  },[categorias,cartoes,extrato,fatura,orcData,saldoAtual,loaded]);
+
+  const orcamentos={data:orcData,update:(k,v)=>setOrcData(p=>({...p,[k]:v}))};
+  const semCatExt=extrato.filter(e=>!e.categoriaId).length;
+  const semCatFat=fatura.filter(e=>!e.categoriaId).length;
+  const syncColors={carregando:{bg:C.purplePale,color:C.purple},ok:{bg:C.greenPale,color:C.green},salvando:{bg:C.yellowPale,color:C.yellow},erro:{bg:C.redPale,color:C.red}};
+  const syncLabels={carregando:"⏳ carregando…",ok:"☁️ sincronizado",salvando:"💾 salvando…",erro:"❌ erro ao salvar"};
+
+  if(!loaded)return(<div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}><div style={{fontSize:40}}>🌸</div><div style={{fontSize:14,color:C.muted,fontWeight:600}}>Carregando seus dados…</div></div>);
+
+  return(<div style={{minHeight:"100vh",background:C.bg}}>
+    <div style={{background:C.white,borderBottom:`1.5px solid ${C.border}`,boxShadow:"0 2px 16px #D96B8A0D",position:"sticky",top:0,zIndex:100}}>
+      <div style={{maxWidth:1280,margin:"0 auto",padding:"0 24px",display:"flex",alignItems:"center",gap:20}}>
+        <div style={{padding:"14px 0",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+          <div style={{width:32,height:32,borderRadius:10,background:`linear-gradient(135deg,${C.accent},${C.accentLight})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,boxShadow:`0 2px 8px ${C.accent}44`}}>🌸</div>
+          <div><div style={{fontWeight:800,fontSize:14,color:C.text,lineHeight:1.1}}>Meu Financeiro</div><div style={{fontSize:10,color:C.muted,fontWeight:600}}>{ano}</div></div>
+        </div>
+        <nav style={{display:"flex",flex:1,overflowX:"auto"}}>
+          {TABS.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{background:"none",border:"none",padding:"16px 14px",color:tab===t.id?C.accent:C.muted,borderBottom:`2.5px solid ${tab===t.id?C.accent:"transparent"}`,fontWeight:tab===t.id?800:600,fontSize:13,cursor:"pointer",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
+            {t.label}
+            {t.id==="extrato"&&semCatExt>0&&<Badge color={C.yellow} bg={C.yellowPale}>{semCatExt}</Badge>}
+            {t.id==="cartao"&&semCatFat>0&&<Badge color={C.yellow} bg={C.yellowPale}>{semCatFat}</Badge>}
+          </button>))}
+        </nav>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
+          <div style={{background:saldoAtual>=0?C.greenPale:C.redPale,border:`1.5px solid ${saldoAtual>=0?C.green+"44":C.red+"44"}`,borderRadius:10,padding:"6px 14px",textAlign:"right"}}>
+            <div style={{fontSize:9.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>Saldo</div>
+            <div style={{fontSize:14,fontFamily:"'DM Mono',monospace",fontWeight:800,color:saldoAtual>=0?C.green:C.red}}>{fmt(saldoAtual)}</div>
+          </div>
+          <div style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:6,...syncColors[syncStatus]}}>{syncLabels[syncStatus]}</div>
+        </div>
+      </div>
+    </div>
+    <div style={{maxWidth:1280,margin:"0 auto",padding:"24px"}}>
+      {tab==="anual"&&<TabAnual extrato={extrato} fatura={fatura} orcamentos={orcamentos} categorias={categorias} saldoAtual={saldoAtual} ano={ano}/>}
+      {tab==="mensal"&&<TabMensal extrato={extrato} fatura={fatura} orcamentos={orcamentos} categorias={categorias} mesSel={mesSel} setMesSel={setMesSel} ano={ano}/>}
+      {tab==="extrato"&&<TabExtrato extrato={extrato} setExtrato={setExtrato} categorias={categorias}/>}
+      {tab==="cartao"&&<TabCartao fatura={fatura} setFatura={setFatura} categorias={categorias} cartoes={cartoes} setCartoes={setCartoes}/>}
+      {tab==="cadastro"&&<TabCadastro categorias={categorias} setCategorias={setCategorias} saldoAtual={saldoAtual} setSaldoAtual={setSaldoAtual}/>}
+    </div>
+  </div>);
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
