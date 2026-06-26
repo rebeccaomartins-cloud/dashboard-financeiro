@@ -194,7 +194,7 @@ function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
           <span style={{fontWeight:700}}>{c.nome}</span>
           {hasSubs&&<span style={{fontSize:10,color:C.muted,marginLeft:2}}>{isOpen?"▲":"▼"} {subs.length}</span>}
         </div></td>
-        <td>{tipo==="despesa"&&<OrcInput orcKey={key} prev={prev}/>}</td>
+        <td><OrcInput orcKey={key} prev={prev}/></td>
         <td style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:tipo==="despesa"?C.red:C.green}}>{fmt(real)}</td>
         <td style={{fontFamily:"'DM Mono',monospace",fontWeight:800,color:diff>=0?C.green:C.red}}>{fmt(diff)}</td>
         {tipo==="despesa"&&<td style={{width:140}}><ProgressBar value={real} max={prev||1} color={c.cor}/></td>}
@@ -240,7 +240,7 @@ function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
       </tbody></table>
     </Card>
     <Card style={{padding:0}}><STitle right={<span style={{fontSize:11,color:C.muted,fontWeight:500}}>clique na categoria para expandir</span>}>🌱 Receitas por Categoria</STitle>
-      <table><thead><tr><th>Categoria</th><th></th><th>Real</th><th>Diferença</th></tr></thead>
+      <table><thead><tr><th>Categoria</th><th>Previsto</th><th>Real</th><th>Diferença</th></tr></thead>
       <tbody>
         {catR.length===0&&<tr><td colSpan={4} style={{textAlign:"center",color:C.muted,padding:28}}>Cadastre categorias de receita.</td></tr>}
         <CatRows cats={catR} tipo="receita"/>
