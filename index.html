@@ -175,6 +175,7 @@ function TabAnual({extrato,categorias,saldoTotal,calcSaldoBanco,bancos,ano}){
 }
 
 // ── TAB MENSAL — usa apenas extrato, com subcategorias expansíveis ──────────
+const OrcInput=({orcKey,prev,upd})=>(<input type="number" value={prev||""} placeholder="—" onChange={e=>upd(orcKey,parseFloat(e.target.value)||0)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.text,padding:"4px 8px",fontSize:12,width:100,fontFamily:"'DM Mono',monospace",outline:"none",fontWeight:600}}/>);
 function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
   const orc=orcamentos.data,upd=orcamentos.update;
   const{start,end}=getCiclo(mesSel,ano);
@@ -191,7 +192,6 @@ function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
   const totalPrev=catD.reduce((s,c)=>s+(orc[`${mesSel}_${ano}_${c.id}`]||0),0);
   const totalReal=catD.reduce((s,c)=>s+realPorCat(c.id),0);
   const totalRec=catR.reduce((s,c)=>s+realPorCat(c.id),0);
-  const OrcInput=({orcKey,prev})=>(<input type="number" value={prev||""} placeholder="—" onChange={e=>upd(orcKey,parseFloat(e.target.value)||0)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.text,padding:"4px 8px",fontSize:12,width:100,fontFamily:"'DM Mono',monospace",outline:"none",fontWeight:600}}/>);
 
   const CatRows=({cats,tipo})=>cats.map(c=>{
     const key=`${mesSel}_${ano}_${c.id}`,prev=orc[key]||0,real=realPorCat(c.id);
@@ -207,7 +207,7 @@ function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
           <span style={{fontWeight:700}}>{c.nome}</span>
           {hasSubs&&<span style={{fontSize:10,color:C.muted,marginLeft:2}}>{isOpen?"▲":"▼"} {subs.length}</span>}
         </div></td>
-        <td><OrcInput orcKey={key} prev={prev}/></td>
+        <td><OrcInput orcKey={key} prev={prev} upd={upd}/></td>
         <td style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:tipo==="despesa"?C.red:C.green}}>{fmt(real)}</td>
         <td style={{fontFamily:"'DM Mono',monospace",fontWeight:800,color:diff>=0?C.green:C.red}}>{fmt(diff)}</td>
         {tipo==="despesa"&&<td style={{width:140}}><ProgressBar value={real} max={prev||1} color={c.cor}/></td>}
@@ -249,14 +249,14 @@ function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
       <table><thead><tr><th>Categoria</th><th>Previsto</th><th>Real</th><th>Diferença</th><th>Progresso</th></tr></thead>
       <tbody>
         {catD.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:C.muted,padding:28}}>Cadastre categorias na aba Cadastro.</td></tr>}
-        <CatRows cats={catD} tipo="despesa"/>
+        {CatRows({cats:catD,tipo:"despesa"})}
       </tbody></table>
     </Card>
     <Card style={{padding:0}}><STitle right={<span style={{fontSize:11,color:C.muted,fontWeight:500}}>clique na categoria para expandir</span>}>🌱 Receitas por Categoria</STitle>
       <table><thead><tr><th>Categoria</th><th>Previsto</th><th>Real</th><th>Diferença</th></tr></thead>
       <tbody>
         {catR.length===0&&<tr><td colSpan={4} style={{textAlign:"center",color:C.muted,padding:28}}>Cadastre categorias de receita.</td></tr>}
-        <CatRows cats={catR} tipo="receita"/>
+        {CatRows({cats:catR,tipo:"receita"})}
       </tbody></table>
     </Card>
   </div>);
