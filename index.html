@@ -211,8 +211,11 @@ function CsvImportBox({titulo,dica,placeholder,onImport,onClose,extra}){
 
 // ── TAB EXTRATO — com filtro por banco e suporte a transferência ─────────────
 function TabExtrato({extrato,setExtrato,categorias,bancos,calcSaldoBanco}){
+  const anoAtual=new Date().getFullYear();
   const[showImp,setShowImp]=useState(false);
   const[filterBanco,setFilterBanco]=useState("");
+  const[filterMes,setFilterMes]=useState("");
+  const[filterAno,setFilterAno]=useState(String(anoAtual));
   const[filterCat,setFilterCat]=useState("");
   const[impBanco,setImpBanco]=useState("");
   const[msg,setMsg]=useState("");
@@ -233,10 +236,15 @@ function TabExtrato({extrato,setExtrato,categorias,bancos,calcSaldoBanco}){
   const filtered=useMemo(()=>{
     let f=extrato;
     if(filterBanco)f=f.filter(e=>e.bancoId===filterBanco);
+    if(filterMes!=="")f=f.filter(e=>{
+      if(!e.data)return false;
+      const d=new Date(e.data+"T12:00:00");
+      return d.getMonth()===Number(filterMes)&&String(d.getFullYear())===filterAno;
+    });
     if(filterCat==="transf")f=f.filter(e=>e.categoriaId===CAT_TRANSF);
     else if(filterCat)f=f.filter(e=>e.categoriaId===filterCat);
     return f;
-  },[extrato,filterBanco,filterCat]);
+  },[extrato,filterBanco,filterMes,filterAno,filterCat]);
 
   const catOpts=categorias.map(c=>({value:c.id,label:`${c.tipo==="receita"?"↑":"↓"} ${c.nome}`}));
   const bancoOpts=bancos.map(b=>({value:b.id,label:`${b.nome} — ${b.banco}`}));
@@ -246,7 +254,10 @@ function TabExtrato({extrato,setExtrato,categorias,bancos,calcSaldoBanco}){
       <Btn onClick={()=>{setShowImp(!showImp);setMsg("");}}>📥 Importar CSV</Btn>
       <Btn onClick={add} variant="ghost">+ Linha manual</Btn>
       <Sel value={filterBanco} onChange={setFilterBanco} options={bancoOpts} placeholder="Todos os bancos" style={{minWidth:180}}/>
+      <Sel value={filterMes} onChange={setFilterMes} options={MONTHS.map((m,i)=>({value:String(i),label:m}))} placeholder="Todos os meses" style={{minWidth:150}}/>
+      {filterMes!==""&&<Sel value={filterAno} onChange={setFilterAno} options={[anoAtual-1,anoAtual,anoAtual+1].map(a=>({value:String(a),label:String(a)}))} style={{minWidth:90}}/>}
       <Sel value={filterCat} onChange={setFilterCat} options={[{value:"transf",label:"↔ Transferências"},...catOpts]} placeholder="Todas as categorias" style={{minWidth:200}}/>
+      {(filterBanco||filterMes!==""||filterCat)&&<Btn onClick={()=>{setFilterBanco("");setFilterMes("");setFilterCat("");}} variant="ghost" style={{fontSize:11}}>✕ limpar filtros</Btn>}
     </div>
     {msg&&<div style={{fontSize:12,padding:"8px 12px",borderRadius:8,fontWeight:600,background:msg.startsWith("✅")?C.greenPale:C.redPale,color:msg.startsWith("✅")?C.green:C.red}}>{msg}</div>}
     {bancos.length>0&&(<div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{bancos.map(b=>{const bc=BANK_COLORS[b.banco]||C.accent;const sal=calcSaldoBanco[b.id]||0;return(<div key={b.id} style={{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:14,padding:"14px 18px",flex:1,minWidth:160,position:"relative",overflow:"hidden"}}><div style={{position:"absolute",top:0,left:0,right:0,height:4,background:bc}}/><div style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",marginBottom:2}}>{b.banco}</div><div style={{fontSize:12,fontWeight:800,marginBottom:4,color:C.textMid}}>{b.nome}</div><div style={{fontSize:9,color:C.muted,marginBottom:2}}>Inicial ({b.dataInicial?new Date(b.dataInicial+"T12:00:00").toLocaleDateString("pt-BR"):"—"}): {fmt(b.saldoInicial||0)}</div><div style={{fontSize:18,fontFamily:"'DM Mono',monospace",fontWeight:800,color:sal>=0?C.green:C.red}}>{fmt(sal)}</div></div>);})}</div>)}
@@ -460,21 +471,28 @@ function App(){
   const[orcData,setOrcData]=useState({});
   const[mesSel,setMesSel]=useState(new Date().getMonth());
 
-  // Calcula saldo atual de cada banco: saldoInicial + movimentações do extrato após dataInicial
+  // Calcula saldo atual de cada banco
+  // Regras:
+  // - Lançamentos normais: somam diretamente ao banco (valor +/-)
+  // - Transferência saindo (categoriaId===CAT_TRANSF, bancoId===X): valor negativo já debita X
+  // - Transferência chegando (transferenciaParaId===Y): credita Y com o valor absoluto
   const calcSaldoBanco=useMemo(()=>{
     const map={};
-    bancos.forEach(b=>{
-      const dataIni=b.dataInicial||"";
-      // soma todos os lançamentos do extrato desse banco após a data inicial (exceto transferências que saem)
-      const movs=extrato.filter(e=>{
-        if(e.bancoId!==b.id)return false;
-        if(dataIni&&e.data&&e.data<dataIni)return false;
-        return true;
-      });
-      // transferências que saem: valor negativo, não conta
-      // transferências que entram (transferenciaParaId = este banco): já estão no extrato do banco destino como lançamento separado
-      const total=movs.reduce((s,e)=>s+e.valor,0);
-      map[b.id]=(b.saldoInicial||0)+total;
+    bancos.forEach(b=>{ map[b.id]=b.saldoInicial||0; });
+    extrato.forEach(e=>{
+      const dataIni=bancos.find(b=>b.id===e.bancoId)?.dataInicial||"";
+      if(dataIni&&e.data&&e.data<dataIni)return;
+      // debita do banco de origem (seja transferência ou gasto normal)
+      if(e.bancoId&&map[e.bancoId]!==undefined){
+        map[e.bancoId]+=e.valor;
+      }
+      // credita no banco destino quando é transferência
+      if(e.categoriaId===CAT_TRANSF&&e.transferenciaParaId&&map[e.transferenciaParaId]!==undefined){
+        const dataIniDest=bancos.find(b=>b.id===e.transferenciaParaId)?.dataInicial||"";
+        if(!dataIniDest||!e.data||e.data>=dataIniDest){
+          map[e.transferenciaParaId]+=Math.abs(e.valor);
+        }
+      }
     });
     return map;
   },[bancos,extrato]);
