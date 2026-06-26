@@ -94,7 +94,7 @@ const parseCSVLines=(raw)=>{
     const valorIdx=numCols.length>0?numCols[numCols.length-1].i:-1;
     const desc=cols.filter((c,i)=>!isDate(c)&&i!==valorIdx&&c.length>1);
     descricao=desc.sort((a,b)=>b.length-a.length)[0]||"";
-    return data?{id:Date.now()+Math.random(),data,descricao,valor,categoriaId:"",bancoId:"",transferenciaParaId:""}:null;
+    return data?{id:Date.now()+Math.random(),data,descricao,valor,categoriaId:"",subcategoriaId:"",bancoId:"",transferenciaParaId:""}:null;
   }).filter(Boolean);
 };
 
@@ -107,17 +107,24 @@ const Btn=({children,onClick,variant="primary",style={},disabled})=>{const vs={p
 const Inp=({label,value,onChange,type="text",placeholder,style={}})=>(<div style={{display:"flex",flexDirection:"column",gap:4,...style}}>{label&&<label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</label>}<input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:10,color:C.text,padding:"8px 13px",fontSize:13,outline:"none",fontWeight:500}}/></div>);
 const Sel=({label,value,onChange,options,placeholder,style={}})=>(<div style={{display:"flex",flexDirection:"column",gap:4,...style}}>{label&&<label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</label>}<select value={value} onChange={e=>onChange(e.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:10,color:value?C.text:C.muted,padding:"8px 13px",fontSize:13,outline:"none",fontWeight:500,cursor:"pointer"}}>{placeholder&&<option value="">{placeholder}</option>}{options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select></div>);
 
-// CatSelect com opção especial de Transferência
-const CatSelect=({value,onChange,categorias,tipoFiltro,bancos})=>{
-  const cat=categorias.find(c=>c.id===value);
-  const isTransf=value===CAT_TRANSF;
+// CatSelect com subcategorias e transferência
+const CatSelect=({catId,subId,onCat,onSub,categorias,tipoFiltro})=>{
+  const cat=categorias.find(c=>c.id===catId);
+  const isTransf=catId===CAT_TRANSF;
   const opts=tipoFiltro?categorias.filter(c=>c.tipo===tipoFiltro):categorias;
   const cor=isTransf?C.blue:cat?cat.cor:null;
-  return(<select value={value} onChange={e=>onChange(e.target.value)} style={{background:cor?cor+"22":C.surfaceAlt,border:`1.5px solid ${cor?cor+"88":C.border}`,borderRadius:8,color:cor||C.muted,padding:"3px 10px",fontSize:12,outline:"none",cursor:"pointer",fontWeight:600}}>
-    <option value="">— categorizar —</option>
-    <option value={CAT_TRANSF}>↔ Transferência</option>
-    {opts.map(c=><option key={c.id} value={c.id}>{c.tipo==="receita"?"↑":"↓"} {c.nome}</option>)}
-  </select>);
+  const subs=cat?.subcategorias||[];
+  return(<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+    <select value={catId} onChange={e=>{onCat(e.target.value);onSub("");}} style={{background:cor?cor+"22":C.surfaceAlt,border:`1.5px solid ${cor?cor+"88":C.border}`,borderRadius:8,color:cor||C.muted,padding:"3px 10px",fontSize:12,outline:"none",cursor:"pointer",fontWeight:600}}>
+      <option value="">— categoria —</option>
+      <option value={CAT_TRANSF}>↔ Transferência</option>
+      {opts.map(c=><option key={c.id} value={c.id}>{c.tipo==="receita"?"↑":"↓"} {c.nome}</option>)}
+    </select>
+    {subs.length>0&&!isTransf&&(<select value={subId||""} onChange={e=>onSub(e.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:subId?C.text:C.muted,padding:"3px 10px",fontSize:12,outline:"none",cursor:"pointer"}}>
+      <option value="">— subcategoria —</option>
+      {subs.map(s=><option key={s.id} value={s.id}>{s.nome}</option>)}
+    </select>)}
+  </div>);
 };
 
 // ── TAB ANUAL — usa apenas extrato, sem fatura, sem transferências ──────────
@@ -154,18 +161,66 @@ function TabAnual({extrato,categorias,saldoTotal,calcSaldoBanco,bancos,ano}){
   </div>);
 }
 
-// ── TAB MENSAL — usa apenas extrato, sem fatura, sem transferências ──────────
+// ── TAB MENSAL — usa apenas extrato, com subcategorias expansíveis ──────────
 function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
   const orc=orcamentos.data,upd=orcamentos.update;
   const{start,end}=getCiclo(mesSel,ano);
   const todas=semTransf(extrato.filter(e=>dateInCiclo(e.data,mesSel,ano)));
   const catD=categorias.filter(c=>c.tipo==="despesa");
   const catR=categorias.filter(c=>c.tipo==="receita");
+  const[expanded,setExpanded]=useState({});
+  const toggleExp=id=>setExpanded(p=>({...p,[id]:!p[id]}));
+  // total por categoria (soma subcategorias + sem subcategoria)
   const realPorCat=id=>todas.filter(e=>e.categoriaId===id).reduce((s,e)=>s+Math.abs(e.valor),0);
+  // total por subcategoria
+  const realPorSub=(catId,subId)=>todas.filter(e=>e.categoriaId===catId&&e.subcategoriaId===subId).reduce((s,e)=>s+Math.abs(e.valor),0);
+  const realSemSub=catId=>todas.filter(e=>e.categoriaId===catId&&!e.subcategoriaId).reduce((s,e)=>s+Math.abs(e.valor),0);
   const totalPrev=catD.reduce((s,c)=>s+(orc[`${mesSel}_${ano}_${c.id}`]||0),0);
   const totalReal=catD.reduce((s,c)=>s+realPorCat(c.id),0);
   const totalRec=catR.reduce((s,c)=>s+realPorCat(c.id),0);
   const OrcInput=({orcKey,prev})=>(<input type="number" value={prev||""} placeholder="—" onChange={e=>upd(orcKey,parseFloat(e.target.value)||0)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.text,padding:"4px 8px",fontSize:12,width:100,fontFamily:"'DM Mono',monospace",outline:"none",fontWeight:600}}/>);
+
+  const CatRows=({cats,tipo})=>cats.map(c=>{
+    const key=`${mesSel}_${ano}_${c.id}`,prev=orc[key]||0,real=realPorCat(c.id);
+    const diff=tipo==="despesa"?prev-real:real-prev;
+    const subs=c.subcategorias||[];
+    const hasSubs=subs.length>0;
+    const isOpen=expanded[c.id];
+    const semSub=realSemSub(c.id);
+    return(<React.Fragment key={c.id}>
+      <tr style={{cursor:hasSubs?"pointer":"default"}} onClick={hasSubs?()=>toggleExp(c.id):undefined}>
+        <td><div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{width:9,height:9,borderRadius:"50%",background:c.cor,display:"inline-block",flexShrink:0}}/>
+          <span style={{fontWeight:700}}>{c.nome}</span>
+          {hasSubs&&<span style={{fontSize:10,color:C.muted,marginLeft:2}}>{isOpen?"▲":"▼"} {subs.length}</span>}
+        </div></td>
+        <td>{tipo==="despesa"&&<OrcInput orcKey={key} prev={prev}/>}</td>
+        <td style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:tipo==="despesa"?C.red:C.green}}>{fmt(real)}</td>
+        <td style={{fontFamily:"'DM Mono',monospace",fontWeight:800,color:diff>=0?C.green:C.red}}>{fmt(diff)}</td>
+        {tipo==="despesa"&&<td style={{width:140}}><ProgressBar value={real} max={prev||1} color={c.cor}/></td>}
+      </tr>
+      {hasSubs&&isOpen&&(<React.Fragment>
+        {subs.map(s=>{const sr=realPorSub(c.id,s.id);return(<tr key={s.id} style={{background:C.surfaceAlt}}>
+          <td><div style={{display:"flex",alignItems:"center",gap:8,paddingLeft:22}}>
+            <span style={{width:5,height:5,borderRadius:"50%",background:c.cor+"88",display:"inline-block"}}/>
+            <span style={{fontSize:12,color:C.textMid}}>{s.nome}</span>
+          </div></td>
+          <td></td>
+          <td style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:tipo==="despesa"?C.red:C.green}}>{fmt(sr)}</td>
+          <td style={{fontSize:11,color:C.muted,fontFamily:"'DM Mono',monospace"}}>{real>0?((sr/real)*100).toFixed(0):0}%</td>
+          {tipo==="despesa"&&<td><ProgressBar value={sr} max={real||1} color={c.cor}/></td>}
+        </tr>);})}
+        {semSub>0&&(<tr style={{background:C.surfaceAlt}}>
+          <td><div style={{paddingLeft:22,fontSize:12,color:C.muted,fontStyle:"italic"}}>Sem subcategoria</div></td>
+          <td></td>
+          <td style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:C.muted}}>{fmt(semSub)}</td>
+          <td></td>
+          {tipo==="despesa"&&<td></td>}
+        </tr>)}
+      </React.Fragment>)}
+    </React.Fragment>);
+  });
+
   return(<div style={{display:"flex",flexDirection:"column",gap:20}}>
     <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
       <Sel value={mesSel} onChange={v=>setMesSel(Number(v))} options={MONTHS.map((m,i)=>({value:i,label:m}))} style={{minWidth:160}}/>
@@ -177,18 +232,18 @@ function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
       <KPI icon="💸" label="Despesa Real" value={fmt(totalReal)} color={C.red}/>
       <KPI icon="✨" label="Diferença" value={fmt(totalPrev-totalReal)} color={totalReal<=totalPrev?C.green:C.red} sub={totalReal<=totalPrev?"dentro do orçamento ✓":"acima do orçamento ✗"}/>
     </div>
-    <Card style={{padding:0}}><STitle>🌸 Despesas por Categoria</STitle>
+    <Card style={{padding:0}}><STitle right={<span style={{fontSize:11,color:C.muted,fontWeight:500}}>clique na categoria para expandir</span>}>🌸 Despesas por Categoria</STitle>
       <table><thead><tr><th>Categoria</th><th>Previsto</th><th>Real</th><th>Diferença</th><th>Progresso</th></tr></thead>
       <tbody>
         {catD.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:C.muted,padding:28}}>Cadastre categorias na aba Cadastro.</td></tr>}
-        {catD.map(c=>{const key=`${mesSel}_${ano}_${c.id}`,prev=orc[key]||0,real=realPorCat(c.id),diff=prev-real;return<tr key={c.id}><td><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{width:9,height:9,borderRadius:"50%",background:c.cor,display:"inline-block"}}/><span style={{fontWeight:600}}>{c.nome}</span></div></td><td><OrcInput orcKey={key} prev={prev}/></td><td style={{color:C.red,fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(real)}</td><td style={{fontFamily:"'DM Mono',monospace",fontWeight:800,color:diff>=0?C.green:C.red}}>{fmt(diff)}</td><td style={{width:140}}><ProgressBar value={real} max={prev||1} color={c.cor}/></td></tr>;})}
+        <CatRows cats={catD} tipo="despesa"/>
       </tbody></table>
     </Card>
-    <Card style={{padding:0}}><STitle>🌱 Receitas por Categoria</STitle>
-      <table><thead><tr><th>Categoria</th><th>Previsto</th><th>Real</th><th>Diferença</th></tr></thead>
+    <Card style={{padding:0}}><STitle right={<span style={{fontSize:11,color:C.muted,fontWeight:500}}>clique na categoria para expandir</span>}>🌱 Receitas por Categoria</STitle>
+      <table><thead><tr><th>Categoria</th><th></th><th>Real</th><th>Diferença</th></tr></thead>
       <tbody>
         {catR.length===0&&<tr><td colSpan={4} style={{textAlign:"center",color:C.muted,padding:28}}>Cadastre categorias de receita.</td></tr>}
-        {catR.map(c=>{const key=`${mesSel}_${ano}_${c.id}`,prev=orc[key]||0,real=realPorCat(c.id);return<tr key={c.id}><td><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{width:9,height:9,borderRadius:"50%",background:c.cor||C.green}}/><span style={{fontWeight:600}}>{c.nome}</span></div></td><td><OrcInput orcKey={key} prev={prev}/></td><td style={{color:C.green,fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmt(real)}</td><td style={{fontFamily:"'DM Mono',monospace",fontWeight:800,color:real>=prev?C.green:C.red}}>{fmt(real-prev)}</td></tr>;})}
+        <CatRows cats={catR} tipo="receita"/>
       </tbody></table>
     </Card>
   </div>);
@@ -283,7 +338,7 @@ function TabExtrato({extrato,setExtrato,categorias,bancos,calcSaldoBanco}){
             <td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/></td>
             <td><input type="number" value={e.valor} onChange={ev=>upd(e.id,"valor",ev.target.value)} style={{background:"transparent",border:"none",outline:"none",color:e.valor>=0?C.green:C.red,fontSize:13,fontFamily:"'DM Mono',monospace",fontWeight:700,width:110}}/></td>
             <td>{banco?<Badge color={bc}>{banco.nome}</Badge>:<select value={e.bancoId||""} onChange={ev=>upd(e.id,"bancoId",ev.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.muted,padding:"3px 8px",fontSize:12,outline:"none"}}><option value="">— banco —</option>{bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select>}</td>
-            <td><CatSelect value={e.categoriaId} onChange={v=>upd(e.id,"categoriaId",v)} categorias={categorias}/></td>
+            <td><CatSelect catId={e.categoriaId} subId={e.subcategoriaId||""} onCat={v=>upd(e.id,"categoriaId",v)} onSub={v=>upd(e.id,"subcategoriaId",v)} categorias={categorias}/></td>
             <td>{isTransf?(<select value={e.transferenciaParaId||""} onChange={ev=>upd(e.id,"transferenciaParaId",ev.target.value)} style={{background:C.bluePale,border:`1.5px solid ${C.blue}55`,borderRadius:8,color:C.blue,padding:"3px 8px",fontSize:12,outline:"none",fontWeight:600}}><option value="">— destino —</option>{bancos.filter(b=>b.id!==e.bancoId).map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select>):(<span style={{color:C.muted,fontSize:12}}>—</span>)}</td>
             <td><button onClick={()=>rem(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button></td>
           </tr>);
@@ -330,7 +385,7 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
   const semCat=fatFiltrada.filter(e=>!e.categoriaId).length;
   const resumoCartoes=cartoes.map(c=>{const linhas=(verTodos?fatura:fatura.filter(e=>e.mes_fatura===mesSel&&e.ano_fatura===anoSel)).filter(e=>e.cartaoId===c.id);return{...c,total:linhas.reduce((s,e)=>s+Math.abs(e.valor),0),qtd:linhas.length};});
 
-  // Resumo por categoria da fatura filtrada
+  // Resumo por categoria + subcategoria da fatura filtrada
   const resumoCat=useMemo(()=>{
     const mapa={};
     fatFiltrada.forEach(e=>{
@@ -338,12 +393,22 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
       const key=e.categoriaId||"__sem__";
       const label=cat?cat.nome:"Sem categoria";
       const cor=cat?cat.cor:C.muted;
-      if(!mapa[key])mapa[key]={label,cor,total:0,qtd:0};
+      const subs=cat?.subcategorias||[];
+      if(!mapa[key])mapa[key]={label,cor,total:0,qtd:0,subs:{},subcategorias:subs};
       mapa[key].total+=Math.abs(e.valor);
       mapa[key].qtd++;
+      if(e.subcategoriaId){
+        const sub=subs.find(s=>s.id===e.subcategoriaId);
+        const sk=e.subcategoriaId;
+        if(!mapa[key].subs[sk])mapa[key].subs[sk]={label:sub?sub.nome:e.subcategoriaId,total:0,qtd:0};
+        mapa[key].subs[sk].total+=Math.abs(e.valor);
+        mapa[key].subs[sk].qtd++;
+      }
     });
     return Object.values(mapa).sort((a,b)=>b.total-a.total);
   },[fatFiltrada,categorias]);
+  const[catExpanded,setCatExpanded]=useState({});
+  const toggleCatExp=id=>setCatExpanded(p=>({...p,[id]:!p[id]}));
 
   return(<div style={{display:"flex",flexDirection:"column",gap:16}}>
     <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
@@ -377,15 +442,36 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
 
     {cartoes.length>0&&(<div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{resumoCartoes.map(c=>{const bc=BANK_COLORS[c.banco]||C.accent;return(<div key={c.id} style={{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:14,padding:"14px 18px",flex:1,minWidth:160,position:"relative",overflow:"hidden"}}><div style={{position:"absolute",top:0,left:0,right:0,height:4,background:bc}}/><div style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",marginBottom:4}}>{c.banco}</div><div style={{fontSize:13,fontWeight:800,marginBottom:6}}>{c.nome}</div><div style={{fontSize:20,fontFamily:"'DM Mono',monospace",fontWeight:800,color:C.red}}>{fmt(c.total)}</div><div style={{fontSize:11,color:C.muted,marginTop:3}}>{c.qtd} lançamentos</div><button onClick={()=>remCartao(c.id)} style={{position:"absolute",top:10,right:10,background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13}}>✕</button></div>);})}</div>)}
 
-    {resumoCat.length>0&&(<Card style={{padding:0}}><STitle>🏷️ Gastos por Categoria</STitle>
-      <table><thead><tr><th>Categoria</th><th>Total</th><th>Lançamentos</th><th>% do total</th><th>Barra</th></tr></thead>
-      <tbody>{resumoCat.map((c,i)=>(<tr key={i}>
-        <td><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{width:9,height:9,borderRadius:"50%",background:c.cor,display:"inline-block"}}/><span style={{fontWeight:600}}>{c.label}</span></div></td>
-        <td style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:C.red}}>{fmt(c.total)}</td>
-        <td style={{color:C.muted}}>{c.qtd}</td>
-        <td style={{color:C.muted,fontFamily:"'DM Mono',monospace"}}>{totalFat>0?((c.total/totalFat)*100).toFixed(1):0}%</td>
-        <td style={{width:140}}><ProgressBar value={c.total} max={totalFat||1} color={c.cor}/></td>
-      </tr>))}</tbody>
+    {resumoCat.length>0&&(<Card style={{padding:0}}><STitle right={<span style={{fontSize:11,color:C.muted,fontWeight:500}}>clique para expandir</span>}>🏷️ Gastos por Categoria</STitle>
+      <table><thead><tr><th>Categoria</th><th>Total</th><th>Qtd</th><th>%</th><th>Barra</th></tr></thead>
+      <tbody>{resumoCat.map((c,i)=>{
+        const subList=Object.entries(c.subs||{});
+        const hasS=subList.length>0;
+        const isOpen=catExpanded[i];
+        return(<React.Fragment key={i}>
+          <tr style={{cursor:hasS?"pointer":"default"}} onClick={hasS?()=>toggleCatExp(i):undefined}>
+            <td><div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{width:9,height:9,borderRadius:"50%",background:c.cor,display:"inline-block"}}/>
+              <span style={{fontWeight:700}}>{c.label}</span>
+              {hasS&&<span style={{fontSize:10,color:C.muted}}>{isOpen?"▲":"▼"}</span>}
+            </div></td>
+            <td style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:C.red}}>{fmt(c.total)}</td>
+            <td style={{color:C.muted}}>{c.qtd}</td>
+            <td style={{color:C.muted,fontFamily:"'DM Mono',monospace"}}>{totalFat>0?((c.total/totalFat)*100).toFixed(1):0}%</td>
+            <td style={{width:140}}><ProgressBar value={c.total} max={totalFat||1} color={c.cor}/></td>
+          </tr>
+          {hasS&&isOpen&&subList.map(([sk,sv])=>(<tr key={sk} style={{background:C.surfaceAlt}}>
+            <td><div style={{paddingLeft:22,display:"flex",alignItems:"center",gap:6}}>
+              <span style={{width:5,height:5,borderRadius:"50%",background:c.cor+"88",display:"inline-block"}}/>
+              <span style={{fontSize:12,color:C.textMid}}>{sv.label}</span>
+            </div></td>
+            <td style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:C.red}}>{fmt(sv.total)}</td>
+            <td style={{fontSize:12,color:C.muted}}>{sv.qtd}</td>
+            <td style={{fontSize:12,color:C.muted,fontFamily:"'DM Mono',monospace"}}>{c.total>0?((sv.total/c.total)*100).toFixed(0):0}%</td>
+            <td><ProgressBar value={sv.total} max={c.total||1} color={c.cor}/></td>
+          </tr>))}
+        </React.Fragment>);
+      })}</tbody>
       </table>
     </Card>)}
 
@@ -394,7 +480,7 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
       <div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th>Cartão</th><th>Fatura</th><th>Categoria</th><th></th></tr></thead>
       <tbody>
         {fatFiltrada.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:C.muted,padding:32}}>Nenhum lançamento. Importe um CSV ou adicione manualmente.</td></tr>}
-        {fatFiltrada.map(e=>{const cart=cartoes.find(c=>c.id===e.cartaoId);const bc=BANK_COLORS[cart?.banco]||C.accent;return(<tr key={e.id}><td><input type="date" value={e.data||""} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td><td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/></td><td><input type="number" value={e.valor} onChange={ev=>upd(e.id,"valor",ev.target.value)} style={{background:"transparent",border:"none",color:C.red,fontSize:13,fontFamily:"'DM Mono',monospace",fontWeight:700,width:110,outline:"none"}}/></td><td>{cart?<Badge color={bc}>{cart.nome}</Badge>:<select value={e.cartaoId||""} onChange={ev=>upd(e.id,"cartaoId",ev.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.muted,padding:"3px 8px",fontSize:12,outline:"none"}}><option value="">— cartão —</option>{cartoes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select>}</td><td style={{fontSize:11,color:C.purple,fontWeight:700,whiteSpace:"nowrap"}}>{e.mes_fatura!==undefined?`${MONTHS[e.mes_fatura].slice(0,3)}/${e.ano_fatura}`:"—"}</td><td><CatSelect value={e.categoriaId} onChange={v=>upd(e.id,"categoriaId",v)} categorias={categorias} tipoFiltro="despesa"/></td><td><button onClick={()=>rem(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button></td></tr>);})}
+        {fatFiltrada.map(e=>{const cart=cartoes.find(c=>c.id===e.cartaoId);const bc=BANK_COLORS[cart?.banco]||C.accent;return(<tr key={e.id}><td><input type="date" value={e.data||""} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td><td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/></td><td><input type="number" value={e.valor} onChange={ev=>upd(e.id,"valor",ev.target.value)} style={{background:"transparent",border:"none",color:C.red,fontSize:13,fontFamily:"'DM Mono',monospace",fontWeight:700,width:110,outline:"none"}}/></td><td>{cart?<Badge color={bc}>{cart.nome}</Badge>:<select value={e.cartaoId||""} onChange={ev=>upd(e.id,"cartaoId",ev.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.muted,padding:"3px 8px",fontSize:12,outline:"none"}}><option value="">— cartão —</option>{cartoes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select>}</td><td style={{fontSize:11,color:C.purple,fontWeight:700,whiteSpace:"nowrap"}}>{e.mes_fatura!==undefined?`${MONTHS[e.mes_fatura].slice(0,3)}/${e.ano_fatura}`:"—"}</td><td><CatSelect catId={e.categoriaId} subId={e.subcategoriaId||""} onCat={v=>upd(e.id,"categoriaId",v)} onSub={v=>upd(e.id,"subcategoriaId",v)} categorias={categorias} tipoFiltro="despesa"/></td><td><button onClick={()=>rem(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button></td></tr>);})}
       </tbody></table></div>
     </Card>
   </div>);
@@ -452,7 +538,46 @@ function TabCadastro({categorias,setCategorias,bancos,setBancos}){
         <Btn onClick={addCat}>Adicionar</Btn>
       </div>
     </Card>
-    {["receita","despesa"].map(t=>{const cats=categorias.filter(c=>c.tipo===t);return(<Card key={t} style={{padding:0}}><STitle right={<Badge color={t==="receita"?C.green:C.red}>{cats.length}</Badge>}>{t==="receita"?"🌱 Categorias de Receita":"🌸 Categorias de Despesa"}</STitle>{cats.length===0?<div style={{padding:"16px 18px",color:C.muted,fontSize:13}}>Nenhuma categoria cadastrada.</div>:<table><thead><tr><th>Cor</th><th>Nome</th><th>Tipo</th><th></th></tr></thead><tbody>{cats.map(c=>(<tr key={c.id}><td><span style={{display:"inline-block",width:13,height:13,borderRadius:"50%",background:c.cor}}/></td><td style={{fontWeight:700}}>{c.nome}</td><td><Badge color={t==="receita"?C.green:C.red} bg={t==="receita"?C.greenPale:C.redPale}>{c.tipo}</Badge></td><td><button onClick={()=>remCat(c.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13,fontWeight:600}}>✕ remover</button></td></tr>))}</tbody></table>}</Card>);})}
+    {["receita","despesa"].map(t=>{
+      const cats=categorias.filter(c=>c.tipo===t);
+      return(<Card key={t} style={{padding:0}}>
+        <STitle right={<Badge color={t==="receita"?C.green:C.red}>{cats.length}</Badge>}>{t==="receita"?"🌱 Categorias de Receita":"🌸 Categorias de Despesa"}</STitle>
+        {cats.length===0?<div style={{padding:"16px 18px",color:C.muted,fontSize:13}}>Nenhuma categoria cadastrada.</div>
+        :<div>{cats.map(c=>{
+          const subs=c.subcategorias||[];
+          return(<div key={c.id} style={{borderBottom:`1px solid ${C.borderLight}`}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px"}}>
+              <span style={{display:"inline-block",width:12,height:12,borderRadius:"50%",background:c.cor,flexShrink:0}}/>
+              <span style={{fontWeight:700,flex:1}}>{c.nome}</span>
+              <SubcatAdder catId={c.id} setCategorias={setCategorias}/>
+              <button onClick={()=>remCat(c.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:12}}>✕</button>
+            </div>
+            {subs.length>0&&(<div style={{paddingLeft:36,paddingBottom:8,display:"flex",flexWrap:"wrap",gap:6}}>
+              {subs.map(s=>(<span key={s.id} style={{display:"inline-flex",alignItems:"center",gap:5,background:c.cor+"18",border:`1px solid ${c.cor}44`,borderRadius:99,padding:"2px 10px",fontSize:11,color:c.cor,fontWeight:600}}>
+                {s.nome}
+                <button onClick={()=>setCategorias(p=>p.map(x=>x.id===c.id?{...x,subcategorias:(x.subcategorias||[]).filter(z=>z.id!==s.id)}:x))} style={{background:"none",border:"none",color:c.cor+"88",cursor:"pointer",fontSize:11,padding:0,lineHeight:1}}>✕</button>
+              </span>))}
+            </div>)}
+          </div>);
+        })}</div>}
+      </Card>);
+    })}
+  </div>);
+}
+
+function SubcatAdder({catId,setCategorias}){
+  const[show,setShow]=useState(false);
+  const[nome,setNome]=useState("");
+  const add=()=>{
+    if(!nome.trim())return;
+    setCategorias(p=>p.map(c=>c.id===catId?{...c,subcategorias:[...(c.subcategorias||[]),{id:Date.now().toString(),nome:nome.trim()}]}:c));
+    setNome("");setShow(false);
+  };
+  if(!show)return(<button onClick={()=>setShow(true)} style={{background:C.accentPale,border:`1px solid ${C.accentLight}`,borderRadius:8,color:C.accent,cursor:"pointer",fontSize:11,padding:"2px 8px",fontWeight:700}}>+ sub</button>);
+  return(<div style={{display:"flex",gap:4,alignItems:"center"}}>
+    <input value={nome} onChange={e=>setNome(e.target.value)} onKeyDown={e=>e.key==="Enter"&&add()} placeholder="Nome da subcategoria" autoFocus style={{background:C.surfaceAlt,border:`1.5px solid ${C.accentLight}`,borderRadius:8,padding:"3px 8px",fontSize:12,outline:"none",width:160}}/>
+    <button onClick={add} style={{background:C.greenPale,border:`1px solid ${C.green}55`,borderRadius:8,color:C.green,cursor:"pointer",fontSize:11,padding:"3px 8px",fontWeight:700}}>✓</button>
+    <button onClick={()=>setShow(false)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:12}}>✕</button>
   </div>);
 }
 
