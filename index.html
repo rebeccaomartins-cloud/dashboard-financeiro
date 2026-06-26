@@ -499,7 +499,7 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
   </div>);
 }
 
-function TabCadastro({categorias,setCategorias,bancos,setBancos}){
+function TabCadastro({categorias,setCategorias,bancos,setBancos,allData,restore}){
   const[nome,setNome]=useState(""),[ tipo,setTipo]=useState("despesa"),[cor,setCor]=useState("#D96B8A");
   const[nomeBanco,setNomeBanco]=useState(""),[ bancoBanco,setBancoBanco]=useState("Nubank");
   const[saldoIni,setSaldoIni]=useState(""),[ dataIni,setDataIni]=useState(new Date().toISOString().split("T")[0]);
@@ -509,7 +509,45 @@ function TabCadastro({categorias,setCategorias,bancos,setBancos}){
   const addBanco=()=>{if(!nomeBanco.trim())return;setBancos(p=>[...p,{id:Date.now().toString(),nome:nomeBanco.trim(),banco:bancoBanco,saldoInicial:parseFloat(saldoIni)||0,dataInicial:dataIni}]);setNomeBanco("");setSaldoIni("");};
   const remBanco=id=>setBancos(p=>p.filter(b=>b.id!==id));
   const updBanco=(id,f,v)=>setBancos(p=>p.map(b=>b.id===id?{...b,[f]:f==="saldoInicial"?parseFloat(v)||0:v}:b));
+  const fileRef=useRef(null);
+  const exportBackup=()=>{
+    try{
+      const blob=new Blob([JSON.stringify(allData,null,2)],{type:"application/json"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      const d=new Date();
+      const stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      a.href=url;a.download=`meu-financeiro-backup-${stamp}.json`;
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }catch(err){window.alert("Não foi possível gerar o backup.");}
+  };
+  const importBackup=(e)=>{
+    const file=e.target.files&&e.target.files[0];
+    if(!file){return;}
+    const reader=new FileReader();
+    reader.onload=()=>{
+      try{
+        const d=JSON.parse(reader.result);
+        if(window.confirm("Restaurar este backup vai SUBSTITUIR todos os dados atuais. Deseja continuar?")){
+          restore(d);
+          window.alert("Backup restaurado com sucesso! ✓");
+        }
+      }catch(err){window.alert("Arquivo de backup inválido.");}
+      e.target.value="";
+    };
+    reader.readAsText(file);
+  };
   return(<div style={{display:"flex",flexDirection:"column",gap:20,maxWidth:760}}>
+    <Card>
+      <div style={{fontSize:14,fontWeight:800,marginBottom:6}}>💾 Backup dos dados</div>
+      <div style={{fontSize:12,color:C.textMid,marginBottom:14,lineHeight:1.5}}>Exporte um arquivo com tudo (lançamentos, categorias, previsões, bancos) para guardar no seu computador. Se um dia precisar, importe esse arquivo para restaurar tudo de volta. Vale exportar de vez em quando.</div>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+        <Btn onClick={exportBackup} variant="success">⬇️ Exportar backup</Btn>
+        <Btn onClick={()=>fileRef.current&&fileRef.current.click()} variant="soft">⬆️ Importar backup</Btn>
+        <input ref={fileRef} type="file" accept="application/json,.json" onChange={importBackup} style={{display:"none"}}/>
+      </div>
+    </Card>
     <Card>
       <div style={{fontSize:14,fontWeight:800,marginBottom:14}}>🏦 Cadastrar Conta Bancária</div>
       <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
@@ -638,6 +676,13 @@ function App(){
   const saldoTotal=Object.values(calcSaldoBanco).reduce((s,v)=>s+v,0);
   const ano=new Date().getFullYear();
   const saveTimer=useRef(null);
+  const restoreBackup=(d)=>{
+    if(!d)return;
+    if(d.categorias)setCategorias(d.categorias);
+    setBancos(d.bancos||[]);setCartoes(d.cartoes||[]);
+    setExtrato(d.extrato||[]);setFatura(d.fatura||[]);
+    setOrcData(d.orcData||{});
+  };
 
   useEffect(()=>{
     const local=loadLocal();
@@ -710,7 +755,7 @@ function App(){
       {tab==="mensal"&&<TabMensal extrato={extrato} orcamentos={orcamentos} categorias={categorias} mesSel={mesSel} setMesSel={setMesSel} ano={ano}/>}
       {tab==="extrato"&&<TabExtrato extrato={extrato} setExtrato={setExtrato} categorias={categorias} bancos={bancos} calcSaldoBanco={calcSaldoBanco}/>}
       {tab==="cartao"&&<TabCartao fatura={fatura} setFatura={setFatura} categorias={categorias} cartoes={cartoes} setCartoes={setCartoes}/>}
-      {tab==="cadastro"&&<TabCadastro categorias={categorias} setCategorias={setCategorias} bancos={bancos} setBancos={setBancos}/>}
+      {tab==="cadastro"&&<TabCadastro categorias={categorias} setCategorias={setCategorias} bancos={bancos} setBancos={setBancos} allData={{categorias,bancos,cartoes,extrato,fatura,orcData}} restore={restoreBackup}/>}
     </div>
   </div>);
 }
