@@ -121,7 +121,7 @@ const CatSelect=({value,onChange,categorias,tipoFiltro,bancos})=>{
 };
 
 // ── TAB ANUAL — usa apenas extrato, sem fatura, sem transferências ──────────
-function TabAnual({extrato,categorias,saldoAtual,ano}){
+function TabAnual({extrato,categorias,saldoTotal,calcSaldoBanco,bancos,ano}){
   const meses=MONTHS.map((nome,mi)=>{
     const ext=semTransf(extrato.filter(e=>dateInCiclo(e.data,mi,ano)));
     const receitas=ext.filter(e=>categorias.find(c=>c.id===e.categoriaId)?.tipo==="receita").reduce((s,e)=>s+Math.abs(e.valor),0);
@@ -132,11 +132,12 @@ function TabAnual({extrato,categorias,saldoAtual,ano}){
   const maxR=Math.max(...meses.map(m=>m.receitas),1),maxD=Math.max(...meses.map(m=>m.despesas),1);
   return(<div style={{display:"flex",flexDirection:"column",gap:20}}>
     <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-      <KPI icon="💰" label="Saldo Atual" value={fmt(saldoAtual)} color={saldoAtual>=0?C.green:C.red}/>
+      <KPI icon="💰" label="Saldo Total" value={fmt(saldoTotal)} color={saldoTotal>=0?C.green:C.red}/>
       <KPI icon="🌱" label={`Receitas ${ano}`} value={fmt(totalR)} color={C.green}/>
       <KPI icon="🌸" label={`Despesas ${ano}`} value={fmt(totalD)} color={C.red}/>
       <KPI icon="✨" label={`Resultado ${ano}`} value={fmt(totalR-totalD)} color={totalR>=totalD?C.green:C.red} sub={totalR>=totalD?"no azul ✓":"no vermelho ✗"}/>
     </div>
+    {bancos.length>0&&(<div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{bancos.map(b=>{const bc=BANK_COLORS[b.banco]||C.accent;const sal=calcSaldoBanco[b.id]||0;return(<div key={b.id} style={{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:14,padding:"14px 18px",flex:1,minWidth:160,position:"relative",overflow:"hidden"}}><div style={{position:"absolute",top:0,left:0,right:0,height:4,background:bc}}/><div style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",marginBottom:2}}>{b.banco}</div><div style={{fontSize:12,fontWeight:800,marginBottom:6,color:C.textMid}}>{b.nome}</div><div style={{fontSize:9,color:C.muted,marginBottom:2}}>Saldo inicial: {fmt(b.saldoInicial||0)}</div><div style={{fontSize:18,fontFamily:"'DM Mono',monospace",fontWeight:800,color:sal>=0?C.green:C.red}}>{fmt(sal)}</div><div style={{fontSize:10,color:C.muted,marginTop:2}}>saldo atual</div></div>);})}</div>)}
     <Card>
       <div style={{fontSize:13,fontWeight:800,marginBottom:18}}>Receitas × Despesas — {ano} (extrato)</div>
       <div style={{display:"flex",gap:4,alignItems:"flex-end",height:130}}>
@@ -209,7 +210,7 @@ function CsvImportBox({titulo,dica,placeholder,onImport,onClose,extra}){
 }
 
 // ── TAB EXTRATO — com filtro por banco e suporte a transferência ─────────────
-function TabExtrato({extrato,setExtrato,categorias,bancos}){
+function TabExtrato({extrato,setExtrato,categorias,bancos,calcSaldoBanco}){
   const[showImp,setShowImp]=useState(false);
   const[filterBanco,setFilterBanco]=useState("");
   const[filterCat,setFilterCat]=useState("");
@@ -248,6 +249,7 @@ function TabExtrato({extrato,setExtrato,categorias,bancos}){
       <Sel value={filterCat} onChange={setFilterCat} options={[{value:"transf",label:"↔ Transferências"},...catOpts]} placeholder="Todas as categorias" style={{minWidth:200}}/>
     </div>
     {msg&&<div style={{fontSize:12,padding:"8px 12px",borderRadius:8,fontWeight:600,background:msg.startsWith("✅")?C.greenPale:C.redPale,color:msg.startsWith("✅")?C.green:C.red}}>{msg}</div>}
+    {bancos.length>0&&(<div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{bancos.map(b=>{const bc=BANK_COLORS[b.banco]||C.accent;const sal=calcSaldoBanco[b.id]||0;return(<div key={b.id} style={{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:14,padding:"14px 18px",flex:1,minWidth:160,position:"relative",overflow:"hidden"}}><div style={{position:"absolute",top:0,left:0,right:0,height:4,background:bc}}/><div style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",marginBottom:2}}>{b.banco}</div><div style={{fontSize:12,fontWeight:800,marginBottom:4,color:C.textMid}}>{b.nome}</div><div style={{fontSize:9,color:C.muted,marginBottom:2}}>Inicial ({b.dataInicial?new Date(b.dataInicial+"T12:00:00").toLocaleDateString("pt-BR"):"—"}): {fmt(b.saldoInicial||0)}</div><div style={{fontSize:18,fontFamily:"'DM Mono',monospace",fontWeight:800,color:sal>=0?C.green:C.red}}>{fmt(sal)}</div></div>);})}</div>)}
     {showImp&&<CsvImportBox
       titulo="📥 Importar Extrato Bancário (CSV)"
       dica="Cole o CSV do seu banco. Separador ; ou , — detectado automaticamente."
@@ -387,27 +389,48 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
   </div>);
 }
 
-function TabCadastro({categorias,setCategorias,bancos,setBancos,saldoAtual,setSaldoAtual}){
+function TabCadastro({categorias,setCategorias,bancos,setBancos}){
   const[nome,setNome]=useState(""),[ tipo,setTipo]=useState("despesa"),[cor,setCor]=useState("#D96B8A");
   const[nomeBanco,setNomeBanco]=useState(""),[ bancoBanco,setBancoBanco]=useState("Nubank");
+  const[saldoIni,setSaldoIni]=useState(""),[ dataIni,setDataIni]=useState(new Date().toISOString().split("T")[0]);
   const CORES=["#D96B8A","#F4A7BC","#9B7EC8","#5A9E7C","#C9924A","#56CCF2","#D96B6B","#B8969F","#7DBFAD","#E8A598"];
   const addCat=()=>{if(!nome.trim())return;setCategorias(p=>[...p,{id:Date.now().toString(),nome:nome.trim(),tipo,cor}]);setNome("");};
   const remCat=id=>setCategorias(p=>p.filter(c=>c.id!==id));
-  const addBanco=()=>{if(!nomeBanco.trim())return;setBancos(p=>[...p,{id:Date.now().toString(),nome:nomeBanco.trim(),banco:bancoBanco}]);setNomeBanco("");};
+  const addBanco=()=>{if(!nomeBanco.trim())return;setBancos(p=>[...p,{id:Date.now().toString(),nome:nomeBanco.trim(),banco:bancoBanco,saldoInicial:parseFloat(saldoIni)||0,dataInicial:dataIni}]);setNomeBanco("");setSaldoIni("");};
   const remBanco=id=>setBancos(p=>p.filter(b=>b.id!==id));
-  return(<div style={{display:"flex",flexDirection:"column",gap:20,maxWidth:720}}>
-    <Card style={{background:`linear-gradient(135deg,${C.accentPale},${C.purplePale})`,border:`1.5px solid ${C.accentLight}`}}>
-      <div style={{fontSize:14,fontWeight:800,marginBottom:14}}>💰 Saldo Atual da Conta</div>
-      <div style={{display:"flex",gap:14,alignItems:"flex-end",flexWrap:"wrap"}}><Inp label="Informe o saldo (R$)" type="number" value={saldoAtual} onChange={v=>setSaldoAtual(parseFloat(v)||0)} placeholder="0,00" style={{flex:1,minWidth:180}}/><div style={{fontSize:26,fontWeight:800,fontFamily:"'DM Mono',monospace",color:saldoAtual>=0?C.green:C.red,paddingBottom:2}}>{fmt(saldoAtual)}</div></div>
-    </Card>
+  const updBanco=(id,f,v)=>setBancos(p=>p.map(b=>b.id===id?{...b,[f]:f==="saldoInicial"?parseFloat(v)||0:v}:b));
+  return(<div style={{display:"flex",flexDirection:"column",gap:20,maxWidth:760}}>
     <Card>
       <div style={{fontSize:14,fontWeight:800,marginBottom:14}}>🏦 Cadastrar Conta Bancária</div>
       <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
         <Inp label="Nome da conta" value={nomeBanco} onChange={setNomeBanco} placeholder="Ex: Nubank Pessoal" style={{flex:2,minWidth:160}}/>
-        <Sel label="Banco" value={bancoBanco} onChange={setBancoBanco} options={BANKS.map(b=>({value:b,label:b}))} style={{minWidth:150}}/>
+        <Sel label="Banco" value={bancoBanco} onChange={setBancoBanco} options={BANKS.map(b=>({value:b,label:b}))} style={{minWidth:140}}/>
+        <Inp label="Saldo inicial (R$)" type="number" value={saldoIni} onChange={setSaldoIni} placeholder="0,00" style={{minWidth:130}}/>
+        <Inp label="Data do saldo inicial" type="date" value={dataIni} onChange={setDataIni} style={{minWidth:160}}/>
         <Btn onClick={addBanco}>Adicionar</Btn>
       </div>
-      {bancos.length>0&&<table style={{marginTop:14}}><thead><tr><th>Nome</th><th>Banco</th><th></th></tr></thead><tbody>{bancos.map(b=>(<tr key={b.id}><td style={{fontWeight:700}}>{b.nome}</td><td><Badge color={BANK_COLORS[b.banco]||C.accent}>{b.banco}</Badge></td><td><button onClick={()=>remBanco(b.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13}}>✕ remover</button></td></tr>))}</tbody></table>}
+      {bancos.length>0&&(<div style={{marginTop:16,display:"flex",flexDirection:"column",gap:10}}>
+        {bancos.map(b=>{const bc=BANK_COLORS[b.banco]||C.accent;return(<div key={b.id} style={{border:`1.5px solid ${C.border}`,borderRadius:12,padding:"14px 16px",position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",top:0,left:0,bottom:0,width:4,background:bc,borderRadius:"4px 0 0 4px"}}/>
+          <div style={{paddingLeft:12}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+              <span style={{fontWeight:800,fontSize:13}}>{b.nome}</span><Badge color={bc}>{b.banco}</Badge>
+              <button onClick={()=>remBanco(b.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:12,marginLeft:"auto"}}>✕ remover</button>
+            </div>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                <label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>Saldo Inicial (R$)</label>
+                <input type="number" value={b.saldoInicial||""} placeholder="0,00" onChange={e=>updBanco(b.id,"saldoInicial",e.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.text,padding:"6px 10px",fontSize:13,outline:"none",fontFamily:"'DM Mono',monospace",fontWeight:600,width:140}}/>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                <label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>Data do Saldo Inicial</label>
+                <input type="date" value={b.dataInicial||""} onChange={e=>updBanco(b.id,"dataInicial",e.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.text,padding:"6px 10px",fontSize:13,outline:"none"}}/>
+              </div>
+              <div style={{fontSize:11,color:C.muted,fontWeight:600,paddingBottom:6}}>Saldo atual calculado automaticamente pelo extrato.</div>
+            </div>
+          </div>
+        </div>);})}
+      </div>)}
     </Card>
     <Card>
       <div style={{fontSize:14,fontWeight:800,marginBottom:14}}>🏷️ Nova Categoria</div>
@@ -435,8 +458,28 @@ function App(){
   const[extrato,setExtrato]=useState([]);
   const[fatura,setFatura]=useState([]);
   const[orcData,setOrcData]=useState({});
-  const[saldoAtual,setSaldoAtual]=useState(0);
   const[mesSel,setMesSel]=useState(new Date().getMonth());
+
+  // Calcula saldo atual de cada banco: saldoInicial + movimentações do extrato após dataInicial
+  const calcSaldoBanco=useMemo(()=>{
+    const map={};
+    bancos.forEach(b=>{
+      const dataIni=b.dataInicial||"";
+      // soma todos os lançamentos do extrato desse banco após a data inicial (exceto transferências que saem)
+      const movs=extrato.filter(e=>{
+        if(e.bancoId!==b.id)return false;
+        if(dataIni&&e.data&&e.data<dataIni)return false;
+        return true;
+      });
+      // transferências que saem: valor negativo, não conta
+      // transferências que entram (transferenciaParaId = este banco): já estão no extrato do banco destino como lançamento separado
+      const total=movs.reduce((s,e)=>s+e.valor,0);
+      map[b.id]=(b.saldoInicial||0)+total;
+    });
+    return map;
+  },[bancos,extrato]);
+
+  const saldoTotal=Object.values(calcSaldoBanco).reduce((s,v)=>s+v,0);
   const ano=new Date().getFullYear();
   const saveTimer=useRef(null);
 
@@ -449,7 +492,6 @@ function App(){
         if(saved.extrato)setExtrato(saved.extrato);
         if(saved.fatura)setFatura(saved.fatura);
         if(saved.orcData)setOrcData(saved.orcData);
-        if(saved.saldoAtual!==undefined)setSaldoAtual(saved.saldoAtual);
       }
       setLoaded(true);setSyncStatus("ok");
     }).catch(()=>{setLoaded(true);setSyncStatus("erro");});
@@ -460,12 +502,12 @@ function App(){
     setSyncStatus("salvando");
     clearTimeout(saveTimer.current);
     saveTimer.current=setTimeout(()=>{
-      saveAll({categorias,bancos,cartoes,extrato,fatura,orcData,saldoAtual}).then(()=>setSyncStatus("ok")).catch(()=>setSyncStatus("erro"));
+      saveAll({categorias,bancos,cartoes,extrato,fatura,orcData}).then(()=>setSyncStatus("ok")).catch(()=>setSyncStatus("erro"));
     },1200);
-  },[categorias,bancos,cartoes,extrato,fatura,orcData,saldoAtual,loaded]);
+  },[categorias,bancos,cartoes,extrato,fatura,orcData,loaded]);
 
   const orcamentos={data:orcData,update:(k,v)=>setOrcData(p=>({...p,[k]:v}))};
-  const semCatExt=extrato.filter(e=>!e.categoriaId&&e.categoriaId!==CAT_TRANSF).length;
+  const semCatExt=extrato.filter(e=>!e.categoriaId).length;
   const semCatFat=fatura.filter(e=>!e.categoriaId).length;
   const syncColors={carregando:{bg:C.purplePale,color:C.purple},ok:{bg:C.greenPale,color:C.green},salvando:{bg:C.yellowPale,color:C.yellow},erro:{bg:C.redPale,color:C.red}};
   const syncLabels={carregando:"⏳ carregando…",ok:"☁️ sincronizado",salvando:"💾 salvando…",erro:"❌ erro ao salvar"};
@@ -487,20 +529,20 @@ function App(){
           </button>))}
         </nav>
         <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
-          <div style={{background:saldoAtual>=0?C.greenPale:C.redPale,border:`1.5px solid ${saldoAtual>=0?C.green+"44":C.red+"44"}`,borderRadius:10,padding:"6px 14px",textAlign:"right"}}>
-            <div style={{fontSize:9.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>Saldo</div>
-            <div style={{fontSize:14,fontFamily:"'DM Mono',monospace",fontWeight:800,color:saldoAtual>=0?C.green:C.red}}>{fmt(saldoAtual)}</div>
+          <div style={{background:saldoTotal>=0?C.greenPale:C.redPale,border:`1.5px solid ${saldoTotal>=0?C.green+"44":C.red+"44"}`,borderRadius:10,padding:"6px 14px",textAlign:"right"}}>
+            <div style={{fontSize:9.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>Saldo Total</div>
+            <div style={{fontSize:14,fontFamily:"'DM Mono',monospace",fontWeight:800,color:saldoTotal>=0?C.green:C.red}}>{fmt(saldoTotal)}</div>
           </div>
           <div style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:6,...syncColors[syncStatus]}}>{syncLabels[syncStatus]}</div>
         </div>
       </div>
     </div>
     <div style={{maxWidth:1280,margin:"0 auto",padding:"24px"}}>
-      {tab==="anual"&&<TabAnual extrato={extrato} categorias={categorias} saldoAtual={saldoAtual} ano={ano}/>}
+      {tab==="anual"&&<TabAnual extrato={extrato} categorias={categorias} saldoTotal={saldoTotal} calcSaldoBanco={calcSaldoBanco} bancos={bancos} ano={ano}/>}
       {tab==="mensal"&&<TabMensal extrato={extrato} orcamentos={orcamentos} categorias={categorias} mesSel={mesSel} setMesSel={setMesSel} ano={ano}/>}
-      {tab==="extrato"&&<TabExtrato extrato={extrato} setExtrato={setExtrato} categorias={categorias} bancos={bancos}/>}
+      {tab==="extrato"&&<TabExtrato extrato={extrato} setExtrato={setExtrato} categorias={categorias} bancos={bancos} calcSaldoBanco={calcSaldoBanco}/>}
       {tab==="cartao"&&<TabCartao fatura={fatura} setFatura={setFatura} categorias={categorias} cartoes={cartoes} setCartoes={setCartoes}/>}
-      {tab==="cadastro"&&<TabCadastro categorias={categorias} setCategorias={setCategorias} bancos={bancos} setBancos={setBancos} saldoAtual={saldoAtual} setSaldoAtual={setSaldoAtual}/>}
+      {tab==="cadastro"&&<TabCadastro categorias={categorias} setCategorias={setCategorias} bancos={bancos} setBancos={setBancos}/>}
     </div>
   </div>);
 }
