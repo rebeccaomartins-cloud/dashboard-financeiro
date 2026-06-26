@@ -22,10 +22,10 @@
   const db = getFirestore(app);
   const DOC = doc(db, "financeiro", "dados");
   window._fbLoad = async () => {
-    try { const snap = await getDoc(DOC); return snap.exists() ? snap.data() : null; } catch(e) { return null; }
+    const snap = await getDoc(DOC); return snap.exists() ? snap.data() : null;
   };
   window._fbSave = async (data) => {
-    try { await setDoc(DOC, data); } catch(e) { console.error(e); }
+    await setDoc(DOC, data);
   };
   window._fbReady = true;
   window.dispatchEvent(new Event("fbready"));
@@ -63,7 +63,11 @@ const {useState,useMemo,useEffect,useRef}=React;
 
 const waitFb=()=>new Promise(res=>{if(window._fbReady)return res();window.addEventListener("fbready",res,{once:true});});
 const loadAll=async()=>{await waitFb();return window._fbLoad?window._fbLoad():null;};
-const saveAll=async(data)=>{await waitFb();if(window._fbSave)window._fbSave(data);};
+const saveAll=async(data)=>{await waitFb();if(window._fbSave)return window._fbSave(data);};
+const LSKEY="financeiro_backup_v1";
+const hasData=(d)=>!!(d&&((d.extrato&&d.extrato.length)||(d.fatura&&d.fatura.length)||(d.bancos&&d.bancos.length)||(d.cartoes&&d.cartoes.length)||(d.orcData&&Object.keys(d.orcData).length)));
+const loadLocal=()=>{try{const r=localStorage.getItem(LSKEY);return r?JSON.parse(r):null;}catch(e){return null;}};
+const saveLocal=(d)=>{try{localStorage.setItem(LSKEY,JSON.stringify(d));}catch(e){}};
 
 const C={bg:"#FDF0F3",surface:"#FFFFFF",surfaceAlt:"#FFF5F7",border:"#F2D4DC",borderLight:"#FAE8EC",accent:"#D96B8A",accentLight:"#F4A7BC",accentPale:"#FDEEF2",green:"#5A9E7C",greenPale:"#EAF5EE",red:"#D96B6B",redPale:"#FDEAEA",yellow:"#C9924A",yellowPale:"#FDF3E7",purple:"#9B7EC8",purplePale:"#F3EDFB",blue:"#4A90C8",bluePale:"#EAF2FB",text:"#3A2A30",textMid:"#7A5F68",muted:"#B8969F",white:"#FFFFFF"};
 const MONTHS=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -636,25 +640,37 @@ function App(){
   const saveTimer=useRef(null);
 
   useEffect(()=>{
-    loadAll().then(saved=>{
-      if(saved){
-        if(saved.categorias)setCategorias(saved.categorias);
-        if(saved.bancos)setBancos(saved.bancos);
-        if(saved.cartoes)setCartoes(saved.cartoes);
-        if(saved.extrato)setExtrato(saved.extrato);
-        if(saved.fatura)setFatura(saved.fatura);
-        if(saved.orcData)setOrcData(saved.orcData);
-      }
+    const local=loadLocal();
+    const apply=(d)=>{
+      if(!d)return;
+      if(d.categorias)setCategorias(d.categorias);
+      if(d.bancos)setBancos(d.bancos);
+      if(d.cartoes)setCartoes(d.cartoes);
+      if(d.extrato)setExtrato(d.extrato);
+      if(d.fatura)setFatura(d.fatura);
+      if(d.orcData)setOrcData(d.orcData);
+    };
+    loadAll().then(cloud=>{
+      // Se a nuvem veio vazia mas existe backup local com dados, recupera do backup
+      const src=(!hasData(cloud)&&hasData(local))?local:cloud;
+      apply(src);
       setLoaded(true);setSyncStatus("ok");
-    }).catch(()=>{setLoaded(true);setSyncStatus("erro");});
+    }).catch(()=>{
+      // Falha ao LER da nuvem: mostra o backup local mas NÃO liga o salvamento,
+      // pra nunca gravar em branco por cima dos dados que estão na nuvem.
+      apply(local);
+      setSyncStatus("erro");
+    });
   },[]);
 
   useEffect(()=>{
     if(!loaded)return;
+    const payload={categorias,bancos,cartoes,extrato,fatura,orcData};
+    saveLocal(payload);
     setSyncStatus("salvando");
     clearTimeout(saveTimer.current);
     saveTimer.current=setTimeout(()=>{
-      saveAll({categorias,bancos,cartoes,extrato,fatura,orcData}).then(()=>setSyncStatus("ok")).catch(()=>setSyncStatus("erro"));
+      saveAll(payload).then(()=>setSyncStatus("ok")).catch(()=>setSyncStatus("erro"));
     },1200);
   },[categorias,bancos,cartoes,extrato,fatura,orcData,loaded]);
 
