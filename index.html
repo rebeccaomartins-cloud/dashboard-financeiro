@@ -193,6 +193,9 @@ function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
   const totalPrev=catD.reduce((s,c)=>s+(orc[`${mesSel}_${ano}_${c.id}`]||0),0);
   const totalReal=catD.reduce((s,c)=>s+realPorCat(c.id),0);
   const totalRec=catR.reduce((s,c)=>s+realPorCat(c.id),0);
+  const totalRecPrev=catR.reduce((s,c)=>s+(orc[`${mesSel}_${ano}_${c.id}`]||0),0);
+  const difPrev=totalRecPrev-totalPrev;
+  const difReal=totalRec-totalReal;
 
   const CatRows=({cats,tipo})=>cats.map(c=>{
     const key=`${mesSel}_${ano}_${c.id}`,prev=orc[key]||0,real=realPorCat(c.id);
@@ -241,10 +244,14 @@ function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
       <div style={{fontSize:12,color:C.muted,fontWeight:600,background:C.accentPale,padding:"6px 12px",borderRadius:8,border:`1px solid ${C.border}`}}>📅 Ciclo conta: {fmtDate(start.toISOString().split("T")[0])} → {fmtDate(end.toISOString().split("T")[0])}</div>
     </div>
     <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-      <KPI icon="🌱" label="Receita Real" value={fmt(totalRec)} color={C.green}/>
+      <KPI icon="🌿" label="Receita Prevista" value={fmt(totalRecPrev)} color={C.green}/>
       <KPI icon="📋" label="Despesa Prevista" value={fmt(totalPrev)} color={C.yellow}/>
+      <KPI icon="🔮" label="Diferença Prevista" value={fmt(difPrev)} color={difPrev>=0?C.green:C.red}/>
+    </div>
+    <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+      <KPI icon="🌱" label="Receita Real" value={fmt(totalRec)} color={C.green}/>
       <KPI icon="💸" label="Despesa Real" value={fmt(totalReal)} color={C.red}/>
-      <KPI icon="✨" label="Diferença" value={fmt(totalPrev-totalReal)} color={totalReal<=totalPrev?C.green:C.red} sub={totalReal<=totalPrev?"dentro do orçamento ✓":"acima do orçamento ✗"}/>
+      <KPI icon="✨" label="Diferença Real" value={fmt(difReal)} color={difReal>=0?C.green:C.red} sub={difReal>=0?"sobrou no mês ✓":"faltou no mês ✗"}/>
     </div>
     <Card style={{padding:0}}><STitle right={<span style={{fontSize:11,color:C.muted,fontWeight:500}}>clique na categoria para expandir</span>}>🌸 Despesas por Categoria</STitle>
       <table><thead><tr><th>Categoria</th><th>Previsto</th><th>Real</th><th>Diferença</th><th>Progresso</th></tr></thead>
