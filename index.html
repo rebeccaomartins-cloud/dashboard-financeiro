@@ -79,6 +79,52 @@ const BANK_COLORS={Nubank:"#820AD1",Itaú:"#EC7000","C6 Bank":"#555555",Inter:"#
 const CAT_TRANSF="__transferencia__";
 
 const fmt=v=>new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(v||0);
+const fmtNum=v=>new Intl.NumberFormat("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2}).format(v||0);
+// Aceita "1.234,56", "1234,56", "1234.56", "-89,9", "R$ 50" etc.
+const parseNum=(s)=>{
+  if(typeof s==="number")return isNaN(s)?0:s;
+  if(s===null||s===undefined)return 0;
+  let t=String(s).replace(/\s/g,"").replace(/R\$/gi,"");
+  if(!t)return 0;
+  const neg=t.indexOf("-")>=0;
+  t=t.replace(/-/g,"");
+  if(t.indexOf(",")>=0){ t=t.replace(/\./g,"").replace(/,/g,"."); }
+  else{
+    const p=t.split(".");
+    // "1.234.567" ou "1.234" (3 dígitos depois do ponto) = separador de milhar
+    if(p.length>2)t=p.join("");
+    else if(p.length===2&&p[1].length===3&&p[0].length>0)t=p.join("");
+  }
+  const n=parseFloat(t);
+  if(isNaN(n))return 0;
+  return neg?-n:n;
+};
+// Campo de valor amigável: teclado numérico no celular, aceita vírgula ou ponto,
+// mostra formatado quando não está sendo editado e seleciona tudo ao tocar.
+const MoneyInput=({value,onCommit,zeroVazio,placeholder,inputStyle={},selectOnFocus=true})=>{
+  const[foco,setFoco]=React.useState(false);
+  const[txt,setTxt]=React.useState("");
+  const num=typeof value==="number"?value:parseNum(value);
+  const display=foco?txt:((zeroVazio&&!num)?"":fmtNum(num));
+  return(<input
+    type="text" inputMode="decimal" enterKeyHint="done" autoComplete="off"
+    value={display}
+    placeholder={placeholder!==undefined?placeholder:"0,00"}
+    onFocus={e=>{
+      setTxt(num?String(num).replace(".",","):"");
+      setFoco(true);
+      if(selectOnFocus){const el=e.target;setTimeout(()=>{try{el.select();}catch(_){}},0);}
+    }}
+    onChange={e=>{
+      let v=e.target.value.replace(/[^0-9.,-]/g,"");
+      setTxt(v);
+      onCommit(parseNum(v));
+    }}
+    onBlur={()=>setFoco(false)}
+    onKeyDown={e=>{if(e.key==="Enter"){e.target.blur();}}}
+    style={{fontFamily:"'DM Mono',monospace",fontWeight:600,outline:"none",...inputStyle}}
+  />);
+};
 const fmtDate=d=>{if(!d)return"";return new Date(d+"T12:00:00").toLocaleDateString("pt-BR");};
 const getCiclo=(mi,year)=>{const start=new Date(year,mi,15);const em=mi===11?0:mi+1,ey=mi===11?year+1:year;return{start,end:new Date(ey,em,14)};};
 const dateInCiclo=(ds,mi,year)=>{if(!ds)return false;const d=new Date(ds+"T12:00:00"),{start,end}=getCiclo(mi,year);return d>=start&&d<=end;};
@@ -176,7 +222,7 @@ function TabAnual({extrato,categorias,saldoTotal,calcSaldoBanco,bancos,ano}){
 }
 
 // ── TAB MENSAL — usa apenas extrato, com subcategorias expansíveis ──────────
-const OrcInput=({orcKey,prev,upd})=>(<input type="number" value={prev||""} placeholder="—" onChange={e=>upd(orcKey,parseFloat(e.target.value)||0)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.text,padding:"4px 8px",fontSize:12,width:100,fontFamily:"'DM Mono',monospace",outline:"none",fontWeight:600}}/>);
+const OrcInput=({orcKey,prev,upd,small})=>(<MoneyInput value={prev||0} zeroVazio placeholder="—" onCommit={v=>upd(orcKey,v)} inputStyle={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.text,padding:small?"3px 8px":"5px 9px",fontSize:small?11.5:12.5,width:small?92:104,textAlign:"right"}}/>);
 function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
   const orc=orcamentos.data,upd=orcamentos.update;
   const{start,end}=getCiclo(mesSel,ano);
@@ -190,20 +236,34 @@ function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
   // total por subcategoria
   const realPorSub=(catId,subId)=>todas.filter(e=>e.categoriaId===catId&&e.subcategoriaId===subId).reduce((s,e)=>s+Math.abs(e.valor),0);
   const realSemSub=catId=>todas.filter(e=>e.categoriaId===catId&&!e.subcategoriaId).reduce((s,e)=>s+Math.abs(e.valor),0);
-  const totalPrev=catD.reduce((s,c)=>s+(orc[`${mesSel}_${ano}_${c.id}`]||0),0);
+  // ── Previsto por subcategoria ──
+  // chave da categoria (legado) = previsão de "sem subcategoria"
+  // chave da subcategoria = `${mes}_${ano}_${catId}__${subId}`
+  const keyCat=cid=>`${mesSel}_${ano}_${cid}`;
+  const keySub=(cid,sid)=>`${mesSel}_${ano}_${cid}__${sid}`;
+  const prevSemSub=cid=>orc[keyCat(cid)]||0;
+  const prevPorSub=(cid,sid)=>orc[keySub(cid,sid)]||0;
+  // previsto da categoria = sem-subcategoria + soma de todas as subcategorias
+  const prevPorCat=c=>(orc[keyCat(c.id)]||0)+(c.subcategorias||[]).reduce((s,sc)=>s+(orc[keySub(c.id,sc.id)]||0),0);
+  const totalPrev=catD.reduce((s,c)=>s+prevPorCat(c),0);
   const totalReal=catD.reduce((s,c)=>s+realPorCat(c.id),0);
   const totalRec=catR.reduce((s,c)=>s+realPorCat(c.id),0);
-  const totalRecPrev=catR.reduce((s,c)=>s+(orc[`${mesSel}_${ano}_${c.id}`]||0),0);
+  const totalRecPrev=catR.reduce((s,c)=>s+prevPorCat(c),0);
+  // expandir/recolher todas as categorias que têm subcategorias
+  const comSubs=[...catD,...catR].filter(c=>(c.subcategorias||[]).length>0);
+  const todasAbertas=comSubs.length>0&&comSubs.every(c=>expanded[c.id]);
+  const toggleTodas=()=>{const n={};comSubs.forEach(c=>{n[c.id]=!todasAbertas;});setExpanded(n);};
   const difPrev=totalRecPrev-totalPrev;
   const difReal=totalRec-totalReal;
 
   const CatRows=({cats,tipo})=>cats.map(c=>{
-    const key=`${mesSel}_${ano}_${c.id}`,prev=orc[key]||0,real=realPorCat(c.id);
-    const diff=tipo==="despesa"?prev-real:real-prev;
     const subs=c.subcategorias||[];
     const hasSubs=subs.length>0;
+    const prev=prevPorCat(c),real=realPorCat(c.id);
+    const diff=tipo==="despesa"?prev-real:real-prev;
     const isOpen=expanded[c.id];
-    const semSub=realSemSub(c.id);
+    const semSub=realSemSub(c.id),semSubPrev=prevSemSub(c.id);
+    const semSubDiff=tipo==="despesa"?semSubPrev-semSub:semSub-semSubPrev;
     return(<React.Fragment key={c.id}>
       <tr style={{cursor:hasSubs?"pointer":"default"}} onClick={hasSubs?()=>toggleExp(c.id):undefined}>
         <td><div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -211,29 +271,34 @@ function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
           <span style={{fontWeight:700}}>{c.nome}</span>
           {hasSubs&&<span style={{fontSize:10,color:C.muted,marginLeft:2}}>{isOpen?"▲":"▼"} {subs.length}</span>}
         </div></td>
-        <td><OrcInput orcKey={key} prev={prev} upd={upd}/></td>
+        <td>{hasSubs
+          ?<div style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:C.textMid}}>{fmt(prev)}<div style={{fontSize:9.5,color:C.muted,fontWeight:600,fontFamily:"'Nunito',sans-serif"}}>soma das subs</div></div>
+          :<OrcInput orcKey={keyCat(c.id)} prev={prev} upd={upd}/>}</td>
         <td style={{fontFamily:"'DM Mono',monospace",fontWeight:700,color:tipo==="despesa"?C.red:C.green}}>{fmt(real)}</td>
         <td style={{fontFamily:"'DM Mono',monospace",fontWeight:800,color:diff>=0?C.green:C.red}}>{fmt(diff)}</td>
         {tipo==="despesa"&&<td style={{width:140}}><ProgressBar value={real} max={prev||1} color={c.cor}/></td>}
       </tr>
       {hasSubs&&isOpen&&(<React.Fragment>
-        {subs.map(s=>{const sr=realPorSub(c.id,s.id);return(<tr key={s.id} style={{background:C.surfaceAlt}}>
+        {subs.map(s=>{
+          const sr=realPorSub(c.id,s.id),sp=prevPorSub(c.id,s.id);
+          const sd=tipo==="despesa"?sp-sr:sr-sp;
+          return(<tr key={s.id} style={{background:C.surfaceAlt}}>
           <td><div style={{display:"flex",alignItems:"center",gap:8,paddingLeft:22}}>
-            <span style={{width:5,height:5,borderRadius:"50%",background:c.cor+"88",display:"inline-block"}}/>
+            <span style={{width:5,height:5,borderRadius:"50%",background:c.cor+"88",display:"inline-block",flexShrink:0}}/>
             <span style={{fontSize:12,color:C.textMid}}>{s.nome}</span>
           </div></td>
-          <td></td>
+          <td><OrcInput orcKey={keySub(c.id,s.id)} prev={sp} upd={upd} small/></td>
           <td style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:tipo==="despesa"?C.red:C.green}}>{fmt(sr)}</td>
-          <td style={{fontSize:11,color:C.muted,fontFamily:"'DM Mono',monospace"}}>{real>0?((sr/real)*100).toFixed(0):0}%</td>
-          {tipo==="despesa"&&<td><ProgressBar value={sr} max={real||1} color={c.cor}/></td>}
+          <td style={{fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:700,color:sd>=0?C.green:C.red}}>{fmt(sd)}</td>
+          {tipo==="despesa"&&<td><ProgressBar value={sr} max={sp||1} color={c.cor}/></td>}
         </tr>);})}
-        {semSub>0&&(<tr style={{background:C.surfaceAlt}}>
+        <tr style={{background:C.surfaceAlt}}>
           <td><div style={{paddingLeft:22,fontSize:12,color:C.muted,fontStyle:"italic"}}>Sem subcategoria</div></td>
-          <td></td>
+          <td><OrcInput orcKey={keyCat(c.id)} prev={semSubPrev} upd={upd} small/></td>
           <td style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:C.muted}}>{fmt(semSub)}</td>
-          <td></td>
-          {tipo==="despesa"&&<td></td>}
-        </tr>)}
+          <td style={{fontFamily:"'DM Mono',monospace",fontSize:12,fontWeight:700,color:semSubDiff>=0?C.green:C.red}}>{fmt(semSubDiff)}</td>
+          {tipo==="despesa"&&<td><ProgressBar value={semSub} max={semSubPrev||1} color={c.cor}/></td>}
+        </tr>
       </React.Fragment>)}
     </React.Fragment>);
   });
@@ -242,6 +307,7 @@ function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
     <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
       <Sel value={mesSel} onChange={v=>setMesSel(Number(v))} options={MONTHS.map((m,i)=>({value:i,label:m}))} style={{minWidth:160}}/>
       <div style={{fontSize:12,color:C.muted,fontWeight:600,background:C.accentPale,padding:"6px 12px",borderRadius:8,border:`1px solid ${C.border}`}}>📅 Ciclo conta: {fmtDate(start.toISOString().split("T")[0])} → {fmtDate(end.toISOString().split("T")[0])}</div>
+      {comSubs.length>0&&<Btn onClick={toggleTodas} variant="ghost" style={{fontSize:12}}>{todasAbertas?"⊖ recolher todas":"⊕ expandir todas"}</Btn>}
     </div>
     <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
       <KPI icon="🌿" label="Receita Prevista" value={fmt(totalRecPrev)} color={C.green}/>
@@ -253,14 +319,14 @@ function TabMensal({extrato,orcamentos,categorias,mesSel,setMesSel,ano}){
       <KPI icon="💸" label="Despesa Real" value={fmt(totalReal)} color={C.red}/>
       <KPI icon="✨" label="Diferença Real" value={fmt(difReal)} color={difReal>=0?C.green:C.red} sub={difReal>=0?"sobrou no mês ✓":"faltou no mês ✗"}/>
     </div>
-    <Card style={{padding:0}}><STitle right={<span style={{fontSize:11,color:C.muted,fontWeight:500}}>clique na categoria para expandir</span>}>🌸 Despesas por Categoria</STitle>
+    <Card style={{padding:0}}><STitle right={<span style={{fontSize:11,color:C.muted,fontWeight:500}}>o previsto é preenchido por subcategoria</span>}>🌸 Despesas por Categoria</STitle>
       <table><thead><tr><th>Categoria</th><th>Previsto</th><th>Real</th><th>Diferença</th><th>Progresso</th></tr></thead>
       <tbody>
         {catD.length===0&&<tr><td colSpan={5} style={{textAlign:"center",color:C.muted,padding:28}}>Cadastre categorias na aba Cadastro.</td></tr>}
         {CatRows({cats:catD,tipo:"despesa"})}
       </tbody></table>
     </Card>
-    <Card style={{padding:0}}><STitle right={<span style={{fontSize:11,color:C.muted,fontWeight:500}}>clique na categoria para expandir</span>}>🌱 Receitas por Categoria</STitle>
+    <Card style={{padding:0}}><STitle right={<span style={{fontSize:11,color:C.muted,fontWeight:500}}>o previsto é preenchido por subcategoria</span>}>🌱 Receitas por Categoria</STitle>
       <table><thead><tr><th>Categoria</th><th>Previsto</th><th>Real</th><th>Diferença</th></tr></thead>
       <tbody>
         {catR.length===0&&<tr><td colSpan={4} style={{textAlign:"center",color:C.muted,padding:28}}>Cadastre categorias de receita.</td></tr>}
@@ -293,6 +359,7 @@ function TabExtrato({extrato,setExtrato,categorias,bancos,calcSaldoBanco}){
   const[filterMes,setFilterMes]=useState("");
   const[filterAno,setFilterAno]=useState(String(anoAtual));
   const[filterCat,setFilterCat]=useState("");
+  const[ordem,setOrdem]=useState("data_desc");
   const[impBanco,setImpBanco]=useState("");
   const[msg,setMsg]=useState("");
 
@@ -305,7 +372,7 @@ function TabExtrato({extrato,setExtrato,categorias,bancos,calcSaldoBanco}){
     return true;
   };
 
-  const upd=(id,f,v)=>setExtrato(p=>p.map(e=>e.id===id?{...e,[f]:f==="valor"?parseFloat(v)||0:v}:e));
+  const upd=(id,f,v)=>setExtrato(p=>p.map(e=>e.id===id?{...e,[f]:f==="valor"?parseNum(v):v}:e));
   const rem=id=>setExtrato(p=>p.filter(e=>e.id!==id));
   const add=()=>setExtrato(p=>[...p,{id:Date.now(),data:new Date().toISOString().split("T")[0],descricao:"",valor:0,categoriaId:"",bancoId:filterBanco||"",transferenciaParaId:""}]);
 
@@ -319,8 +386,21 @@ function TabExtrato({extrato,setExtrato,categorias,bancos,calcSaldoBanco}){
     });
     if(filterCat==="transf")f=f.filter(e=>e.categoriaId===CAT_TRANSF);
     else if(filterCat)f=f.filter(e=>e.categoriaId===filterCat);
+    if(ordem!=="orig"){
+      f=f.slice().sort((a,b)=>{
+        if(ordem==="data_asc"||ordem==="data_desc"){
+          const da=a.data||"",db=b.data||"";
+          if(da===db)return 0;
+          if(!da)return 1;
+          if(!db)return -1;
+          return ordem==="data_asc"?(da<db?-1:1):(da>db?-1:1);
+        }
+        const va=Math.abs(a.valor||0),vb=Math.abs(b.valor||0);
+        return ordem==="valor_desc"?vb-va:va-vb;
+      });
+    }
     return f;
-  },[extrato,filterBanco,filterMes,filterAno,filterCat]);
+  },[extrato,filterBanco,filterMes,filterAno,filterCat,ordem]);
 
   const catOpts=categorias.map(c=>({value:c.id,label:`${c.tipo==="receita"?"↑":"↓"} ${c.nome}`}));
   const bancoOpts=bancos.map(b=>({value:b.id,label:`${b.nome} — ${b.banco}`}));
@@ -333,6 +413,7 @@ function TabExtrato({extrato,setExtrato,categorias,bancos,calcSaldoBanco}){
       <Sel value={filterMes} onChange={setFilterMes} options={MONTHS.map((m,i)=>({value:String(i),label:m}))} placeholder="Todos os meses" style={{minWidth:150}}/>
       {filterMes!==""&&<Sel value={filterAno} onChange={setFilterAno} options={[anoAtual-1,anoAtual,anoAtual+1].map(a=>({value:String(a),label:String(a)}))} style={{minWidth:90}}/>}
       <Sel value={filterCat} onChange={setFilterCat} options={[{value:"transf",label:"↔ Transferências"},...catOpts]} placeholder="Todas as categorias" style={{minWidth:200}}/>
+      <Sel label="Ordenar por" value={ordem} onChange={setOrdem} options={[{value:"data_desc",label:"📅 Data — mais recente"},{value:"data_asc",label:"📅 Data — mais antiga"},{value:"valor_desc",label:"💰 Valor — maior"},{value:"valor_asc",label:"💰 Valor — menor"},{value:"orig",label:"↕️ Ordem de importação"}]} style={{minWidth:190}}/>
       {(filterBanco||filterMes!==""||filterCat)&&<Btn onClick={()=>{setFilterBanco("");setFilterMes("");setFilterCat("");}} variant="ghost" style={{fontSize:11}}>✕ limpar filtros</Btn>}
     </div>
     {msg&&<div style={{fontSize:12,padding:"8px 12px",borderRadius:8,fontWeight:600,background:msg.startsWith("✅")?C.greenPale:C.redPale,color:msg.startsWith("✅")?C.green:C.red}}>{msg}</div>}
@@ -347,7 +428,7 @@ function TabExtrato({extrato,setExtrato,categorias,bancos,calcSaldoBanco}){
     />}
     <Card style={{padding:0}}>
       <STitle right={<Badge color={C.accent}>{filtered.length} lançamentos</Badge>}>Extrato da Conta</STitle>
-      <div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th>Banco</th><th>Categoria</th><th>Transfere para</th><th></th></tr></thead>
+      <div style={{overflowX:"auto"}}><table><thead><tr><th onClick={()=>setOrdem(ordem==="data_asc"?"data_desc":"data_asc")} style={{cursor:"pointer",userSelect:"none",color:ordem.startsWith("data")?C.accent:undefined}}>Data {ordem==="data_asc"?"▲":ordem==="data_desc"?"▼":"⇅"}</th><th>Descrição</th><th onClick={()=>setOrdem(ordem==="valor_desc"?"valor_asc":"valor_desc")} style={{cursor:"pointer",userSelect:"none",color:ordem.startsWith("valor")?C.accent:undefined}}>Valor {ordem==="valor_asc"?"▲":ordem==="valor_desc"?"▼":"⇅"}</th><th>Banco</th><th>Categoria</th><th>Transfere para</th><th></th></tr></thead>
       <tbody>
         {filtered.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:C.muted,padding:32}}>Importe um CSV ou adicione manualmente.</td></tr>}
         {filtered.map(e=>{
@@ -357,7 +438,7 @@ function TabExtrato({extrato,setExtrato,categorias,bancos,calcSaldoBanco}){
           return(<tr key={e.id} style={{background:isTransf?C.bluePale:""}}>
             <td><input type="date" value={e.data||""} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td>
             <td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/></td>
-            <td><input type="number" value={e.valor} onChange={ev=>upd(e.id,"valor",ev.target.value)} style={{background:"transparent",border:"none",outline:"none",color:e.valor>=0?C.green:C.red,fontSize:13,fontFamily:"'DM Mono',monospace",fontWeight:700,width:110}}/></td>
+            <td><MoneyInput value={e.valor} onCommit={v=>upd(e.id,"valor",v)} inputStyle={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:e.valor>=0?C.green:C.red,fontSize:13,fontWeight:700,width:118,padding:"5px 9px",textAlign:"right"}}/></td>
             <td>{banco?<Badge color={bc}>{banco.nome}</Badge>:<select value={e.bancoId||""} onChange={ev=>upd(e.id,"bancoId",ev.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.muted,padding:"3px 8px",fontSize:12,outline:"none"}}><option value="">— banco —</option>{bancos.map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select>}</td>
             <td><CatSelect catId={e.categoriaId} subId={e.subcategoriaId||""} onCat={v=>upd(e.id,"categoriaId",v)} onSub={v=>upd(e.id,"subcategoriaId",v)} categorias={categorias}/></td>
             <td>{isTransf?(<select value={e.transferenciaParaId||""} onChange={ev=>upd(e.id,"transferenciaParaId",ev.target.value)} style={{background:C.bluePale,border:`1.5px solid ${C.blue}55`,borderRadius:8,color:C.blue,padding:"3px 8px",fontSize:12,outline:"none",fontWeight:600}}><option value="">— destino —</option>{bancos.filter(b=>b.id!==e.bancoId).map(b=><option key={b.id} value={b.id}>{b.nome}</option>)}</select>):(<span style={{color:C.muted,fontSize:12}}>—</span>)}</td>
@@ -376,6 +457,8 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
   const[anoSel,setAnoSel]=useState(anoAtual);
   const[verTodos,setVerTodos]=useState(false);
   const[cartaoSel,setCartaoSel]=useState("todos");
+  const[filterCat,setFilterCat]=useState("");
+  const[filterSub,setFilterSub]=useState("");
   const[showNovo,setShowNovo]=useState(false);
   const[nomeC,setNomeC]=useState("");
   const[bancoC,setBancoC]=useState("Nubank");
@@ -397,11 +480,22 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
 
   const addCartao=()=>{if(!nomeC.trim())return;setCartoes(p=>[...p,{id:Date.now().toString(),nome:nomeC.trim(),banco:bancoC}]);setNomeC("");setShowNovo(false);};
   const remCartao=id=>{setCartoes(p=>p.filter(c=>c.id!==id));setFatura(p=>p.filter(e=>e.cartaoId!==id));};
-  const upd=(id,f,v)=>setFatura(p=>p.map(e=>e.id===id?{...e,[f]:f==="valor"?parseFloat(v)||0:v}:e));
+  const upd=(id,f,v)=>setFatura(p=>p.map(e=>e.id===id?{...e,[f]:f==="valor"?parseNum(v):v}:e));
   const rem=id=>setFatura(p=>p.filter(e=>e.id!==id));
-  const add=()=>setFatura(p=>[...p,{id:Date.now(),data:new Date().toISOString().split("T")[0],descricao:"",valor:0,categoriaId:"",cartaoId:cartaoSel!=="todos"?cartaoSel:"",mes_fatura:mesSel,ano_fatura:anoSel}]);
+  const add=()=>setFatura(p=>[...p,{id:Date.now(),data:new Date().toISOString().split("T")[0],descricao:"",valor:0,categoriaId:filterCat&&filterCat!=="__sem__"?filterCat:"",subcategoriaId:filterSub&&filterSub!=="__sem__"?filterSub:"",cartaoId:cartaoSel!=="todos"?cartaoSel:"",mes_fatura:mesSel,ano_fatura:anoSel}]);
   const anos=Array.from({length:3},(_,i)=>anoAtual-1+i);
-  const fatFiltrada=useMemo(()=>{let f=verTodos?fatura:fatura.filter(e=>e.mes_fatura===mesSel&&e.ano_fatura===anoSel);if(cartaoSel!=="todos")f=f.filter(e=>e.cartaoId===cartaoSel);return f;},[fatura,cartaoSel,mesSel,anoSel,verTodos]);
+  const fatFiltrada=useMemo(()=>{
+    let f=verTodos?fatura:fatura.filter(e=>e.mes_fatura===mesSel&&e.ano_fatura===anoSel);
+    if(cartaoSel!=="todos")f=f.filter(e=>e.cartaoId===cartaoSel);
+    if(filterCat==="__sem__")f=f.filter(e=>!e.categoriaId);
+    else if(filterCat){
+      f=f.filter(e=>e.categoriaId===filterCat);
+      if(filterSub==="__sem__")f=f.filter(e=>!e.subcategoriaId);
+      else if(filterSub)f=f.filter(e=>e.subcategoriaId===filterSub);
+    }
+    return f;
+  },[fatura,cartaoSel,mesSel,anoSel,verTodos,filterCat,filterSub]);
+  const subsDoFiltro=(categorias.find(c=>c.id===filterCat)||{}).subcategorias||[];
   const totalFat=fatFiltrada.reduce((s,e)=>s+Math.abs(e.valor),0);
   const semCat=fatFiltrada.filter(e=>!e.categoriaId).length;
   const resumoCartoes=cartoes.map(c=>{const linhas=(verTodos?fatura:fatura.filter(e=>e.mes_fatura===mesSel&&e.ano_fatura===anoSel)).filter(e=>e.cartaoId===c.id);return{...c,total:linhas.reduce((s,e)=>s+Math.abs(e.valor),0),qtd:linhas.length};});
@@ -436,6 +530,9 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
       <div style={{display:"flex",background:C.surfaceAlt,borderRadius:10,border:`1.5px solid ${C.border}`,overflow:"hidden"}}>{[false,true].map(v=>(<button key={String(v)} onClick={()=>setVerTodos(v)} style={{padding:"8px 16px",border:"none",fontSize:13,fontWeight:700,cursor:"pointer",background:verTodos===v?C.accent:"transparent",color:verTodos===v?C.white:C.muted}}>{v?"Todos":"Por Fatura"}</button>))}</div>
       {!verTodos&&<><Sel value={mesSel} onChange={v=>setMesSel(Number(v))} options={MONTHS.map((m,i)=>({value:i,label:m}))} style={{minWidth:140}}/><Sel value={anoSel} onChange={v=>setAnoSel(Number(v))} options={anos.map(a=>({value:a,label:String(a)}))} style={{minWidth:90}}/></>}
       <Sel value={cartaoSel} onChange={setCartaoSel} options={[{value:"todos",label:"Todos os cartões"},...cartoes.map(c=>({value:c.id,label:`${c.nome} — ${c.banco}`}))]} style={{minWidth:200}}/>
+      <Sel value={filterCat} onChange={v=>{setFilterCat(v);setFilterSub("");}} options={[...categorias.filter(c=>c.tipo==="despesa").map(c=>({value:c.id,label:c.nome})),{value:"__sem__",label:"🏷️ Sem categoria"}]} placeholder="Todas as categorias" style={{minWidth:190}}/>
+      {subsDoFiltro.length>0&&<Sel value={filterSub} onChange={setFilterSub} options={[...subsDoFiltro.map(s=>({value:s.id,label:s.nome})),{value:"__sem__",label:"— sem subcategoria —"}]} placeholder="Todas as subcategorias" style={{minWidth:180}}/>}
+      {(filterCat||cartaoSel!=="todos")&&<Btn onClick={()=>{setFilterCat("");setFilterSub("");setCartaoSel("todos");}} variant="ghost" style={{fontSize:11}}>✕ limpar filtros</Btn>}
       <Btn onClick={()=>{setShowImp(!showImp);setMsg("");}}>📥 Importar CSV</Btn>
       <Btn onClick={add} variant="ghost">+ Linha manual</Btn>
       <Btn onClick={()=>setShowNovo(!showNovo)} variant="soft">+ Novo cartão</Btn>
@@ -457,7 +554,7 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
     {cartoes.length===0&&(<Card style={{background:C.accentPale,border:`1.5px solid ${C.accentLight}`,textAlign:"center",padding:40}}><div style={{fontSize:32,marginBottom:8}}>💳</div><div style={{fontSize:13,fontWeight:700,color:C.textMid,marginBottom:4}}>Nenhum cartão cadastrado</div><div style={{fontSize:12,color:C.muted}}>Clique em "+ Novo cartão" para começar.</div></Card>)}
 
     <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-      <KPI icon="💸" label={verTodos?"Total Geral":`Fatura ${MONTHS[mesSel]}/${anoSel}`} value={fmt(totalFat)} color={C.red}/>
+      <KPI icon="💸" label={verTodos?"Total Geral":`Fatura ${MONTHS[mesSel]}/${anoSel}`} value={fmt(totalFat)} color={C.red} sub={filterCat?`filtrado: ${filterCat==="__sem__"?"sem categoria":(categorias.find(c=>c.id===filterCat)||{}).nome||""}`:undefined}/>
       <KPI icon="🏷️" label="Sem categoria" value={semCat} color={semCat>0?C.yellow:C.green} sub={semCat>0?`${semCat} para categorizar`:"tudo categorizado ✓"}/>
     </div>
 
@@ -501,7 +598,7 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
       <div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th>Cartão</th><th>Fatura</th><th>Categoria</th><th></th></tr></thead>
       <tbody>
         {fatFiltrada.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:C.muted,padding:32}}>Nenhum lançamento. Importe um CSV ou adicione manualmente.</td></tr>}
-        {fatFiltrada.map(e=>{const cart=cartoes.find(c=>c.id===e.cartaoId);const bc=BANK_COLORS[cart?.banco]||C.accent;return(<tr key={e.id}><td><input type="date" value={e.data||""} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td><td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/></td><td><input type="number" value={e.valor} onChange={ev=>upd(e.id,"valor",ev.target.value)} style={{background:"transparent",border:"none",color:C.red,fontSize:13,fontFamily:"'DM Mono',monospace",fontWeight:700,width:110,outline:"none"}}/></td><td>{cart?<Badge color={bc}>{cart.nome}</Badge>:<select value={e.cartaoId||""} onChange={ev=>upd(e.id,"cartaoId",ev.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.muted,padding:"3px 8px",fontSize:12,outline:"none"}}><option value="">— cartão —</option>{cartoes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select>}</td><td style={{fontSize:11,color:C.purple,fontWeight:700,whiteSpace:"nowrap"}}>{e.mes_fatura!==undefined?`${MONTHS[e.mes_fatura].slice(0,3)}/${e.ano_fatura}`:"—"}</td><td><CatSelect catId={e.categoriaId} subId={e.subcategoriaId||""} onCat={v=>upd(e.id,"categoriaId",v)} onSub={v=>upd(e.id,"subcategoriaId",v)} categorias={categorias} tipoFiltro="despesa"/></td><td><button onClick={()=>rem(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button></td></tr>);})}
+        {fatFiltrada.map(e=>{const cart=cartoes.find(c=>c.id===e.cartaoId);const bc=BANK_COLORS[cart?.banco]||C.accent;return(<tr key={e.id}><td><input type="date" value={e.data||""} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td><td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/></td><td><MoneyInput value={e.valor} onCommit={v=>upd(e.id,"valor",v)} inputStyle={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:e.valor>=0?C.green:C.red,fontSize:13,fontWeight:700,width:118,padding:"5px 9px",textAlign:"right"}}/></td><td>{cart?<Badge color={bc}>{cart.nome}</Badge>:<select value={e.cartaoId||""} onChange={ev=>upd(e.id,"cartaoId",ev.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.muted,padding:"3px 8px",fontSize:12,outline:"none"}}><option value="">— cartão —</option>{cartoes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select>}</td><td style={{fontSize:11,color:C.purple,fontWeight:700,whiteSpace:"nowrap"}}>{e.mes_fatura!==undefined?`${MONTHS[e.mes_fatura].slice(0,3)}/${e.ano_fatura}`:"—"}</td><td><CatSelect catId={e.categoriaId} subId={e.subcategoriaId||""} onCat={v=>upd(e.id,"categoriaId",v)} onSub={v=>upd(e.id,"subcategoriaId",v)} categorias={categorias} tipoFiltro="despesa"/></td><td><button onClick={()=>rem(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button></td></tr>);})}
       </tbody></table></div>
     </Card>
   </div>);
@@ -514,9 +611,9 @@ function TabCadastro({categorias,setCategorias,bancos,setBancos,allData,restore}
   const CORES=["#D96B8A","#F4A7BC","#9B7EC8","#5A9E7C","#C9924A","#56CCF2","#D96B6B","#B8969F","#7DBFAD","#E8A598"];
   const addCat=()=>{if(!nome.trim())return;setCategorias(p=>[...p,{id:Date.now().toString(),nome:nome.trim(),tipo,cor}]);setNome("");};
   const remCat=id=>setCategorias(p=>p.filter(c=>c.id!==id));
-  const addBanco=()=>{if(!nomeBanco.trim())return;setBancos(p=>[...p,{id:Date.now().toString(),nome:nomeBanco.trim(),banco:bancoBanco,saldoInicial:parseFloat(saldoIni)||0,dataInicial:dataIni}]);setNomeBanco("");setSaldoIni("");};
+  const addBanco=()=>{if(!nomeBanco.trim())return;setBancos(p=>[...p,{id:Date.now().toString(),nome:nomeBanco.trim(),banco:bancoBanco,saldoInicial:parseNum(saldoIni),dataInicial:dataIni}]);setNomeBanco("");setSaldoIni("");};
   const remBanco=id=>setBancos(p=>p.filter(b=>b.id!==id));
-  const updBanco=(id,f,v)=>setBancos(p=>p.map(b=>b.id===id?{...b,[f]:f==="saldoInicial"?parseFloat(v)||0:v}:b));
+  const updBanco=(id,f,v)=>setBancos(p=>p.map(b=>b.id===id?{...b,[f]:f==="saldoInicial"?parseNum(v):v}:b));
   const fileRef=useRef(null);
   const exportBackup=()=>{
     try{
@@ -561,7 +658,10 @@ function TabCadastro({categorias,setCategorias,bancos,setBancos,allData,restore}
       <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
         <Inp label="Nome da conta" value={nomeBanco} onChange={setNomeBanco} placeholder="Ex: Nubank Pessoal" style={{flex:2,minWidth:160}}/>
         <Sel label="Banco" value={bancoBanco} onChange={setBancoBanco} options={BANKS.map(b=>({value:b,label:b}))} style={{minWidth:140}}/>
-        <Inp label="Saldo inicial (R$)" type="number" value={saldoIni} onChange={setSaldoIni} placeholder="0,00" style={{minWidth:130}}/>
+        <div style={{display:"flex",flexDirection:"column",gap:4,minWidth:130}}>
+          <label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>Saldo inicial (R$)</label>
+          <MoneyInput value={saldoIni} zeroVazio onCommit={setSaldoIni} inputStyle={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:10,color:C.text,padding:"8px 13px",fontSize:13,width:"100%",textAlign:"right"}}/>
+        </div>
         <Inp label="Data do saldo inicial" type="date" value={dataIni} onChange={setDataIni} style={{minWidth:160}}/>
         <Btn onClick={addBanco}>Adicionar</Btn>
       </div>
@@ -576,7 +676,7 @@ function TabCadastro({categorias,setCategorias,bancos,setBancos,allData,restore}
             <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
                 <label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>Saldo Inicial (R$)</label>
-                <input type="number" value={b.saldoInicial||""} placeholder="0,00" onChange={e=>updBanco(b.id,"saldoInicial",e.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.text,padding:"6px 10px",fontSize:13,outline:"none",fontFamily:"'DM Mono',monospace",fontWeight:600,width:140}}/>
+                <MoneyInput value={b.saldoInicial||0} zeroVazio onCommit={v=>updBanco(b.id,"saldoInicial",v)} inputStyle={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.text,padding:"6px 10px",fontSize:13,width:140,textAlign:"right"}}/>
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
                 <label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>Data do Saldo Inicial</label>
@@ -740,7 +840,7 @@ function App(){
       <div className="topbar" style={{maxWidth:1280,margin:"0 auto",padding:"0 24px",display:"flex",alignItems:"center",gap:20}}>
         <div style={{padding:"14px 0",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
           <div style={{width:32,height:32,borderRadius:10,background:`linear-gradient(135deg,${C.accent},${C.accentLight})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,boxShadow:`0 2px 8px ${C.accent}44`}}>🌸</div>
-          <div><div style={{fontWeight:800,fontSize:14,color:C.text,lineHeight:1.1}}>Meu Financeiro</div><div style={{fontSize:10,color:C.muted,fontWeight:600}}>{ano}</div></div>
+          <div><div style={{fontWeight:800,fontSize:14,color:C.text,lineHeight:1.1}}>Meu Financeiro</div><div style={{fontSize:10,color:C.muted,fontWeight:600}}>{ano} · v3</div></div>
         </div>
         <nav style={{display:"flex",flex:1,overflowX:"auto"}}>
           {TABS.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{background:"none",border:"none",padding:"16px 14px",color:tab===t.id?C.accent:C.muted,borderBottom:`2.5px solid ${tab===t.id?C.accent:"transparent"}`,fontWeight:tab===t.id?800:600,fontSize:13,cursor:"pointer",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
