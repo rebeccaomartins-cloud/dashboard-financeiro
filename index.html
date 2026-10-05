@@ -451,6 +451,78 @@ function TabExtrato({extrato,setExtrato,categorias,bancos,calcSaldoBanco}){
 }
 
 // ── TAB CARTÃO — com resumo por categoria ────────────────────────────────────
+// ── Formulário de compra parcelada (escopo de módulo) ─────────────────────
+function ParceladaForm({cartoes,categorias,mesIni,anoIni,cartaoIni,anos,onSave,onClose}){
+  const[cartaoId,setCartaoId]=useState(cartaoIni||"");
+  const[descricao,setDescricao]=useState("");
+  const[data,setData]=useState(new Date().toISOString().split("T")[0]);
+  const[modo,setModo]=useState("total");
+  const[valor,setValor]=useState(0);
+  const[nParc,setNParc]=useState("2");
+  const[parcIni,setParcIni]=useState("1");
+  const[mes,setMes]=useState(mesIni);
+  const[ano,setAno]=useState(anoIni);
+  const[catId,setCatId]=useState("");
+  const[subId,setSubId]=useState("");
+  const[erro,setErro]=useState("");
+  const n=Math.max(parseInt(nParc)||0,0);
+  const ini=Math.max(parseInt(parcIni)||1,1);
+  const v=Math.abs(valor||0);
+  const vParc=modo==="total"?(n>0?Math.round(v/n*100)/100:0):v;
+  const vTotal=modo==="total"?v:Math.round(v*n*100)/100;
+  const qtdGerar=n>=ini?n-ini+1:0;
+  const ultMes=(mes+qtdGerar-1)%12, ultAno=ano+Math.floor((mes+qtdGerar-1)/12);
+  const salvar=()=>{
+    if(!cartaoId)return setErro("Selecione o cartão.");
+    if(!descricao.trim())return setErro("Informe a descrição.");
+    if(!v)return setErro("Informe o valor.");
+    if(n<2||n>48)return setErro("Número de parcelas entre 2 e 48.");
+    if(ini>n)return setErro("A parcela inicial não pode ser maior que o total de parcelas.");
+    const grupo="parc_"+Date.now();
+    const linhas=[];
+    for(let k=ini;k<=n;k++){
+      const off=k-ini;const m=(mes+off)%12;const a=ano+Math.floor((mes+off)/12);
+      let val=vParc;
+      if(modo==="total"&&k===n)val=Math.round((vTotal-vParc*(n-1))*100)/100; // última absorve o arredondamento
+      linhas.push({id:grupo+"_"+k,data,descricao:`${descricao.trim()} (${k}/${n})`,valor:-Math.abs(val),categoriaId:catId,subcategoriaId:subId,cartaoId,mes_fatura:m,ano_fatura:a,grupoParcela:grupo,parcela:k,totalParcelas:n,prevista:off>0});
+    }
+    onSave(linhas);
+  };
+  return(<Card style={{background:C.purplePale,border:`1.5px solid ${C.purple}55`}}>
+    <div style={{fontSize:13,fontWeight:800,marginBottom:12}}>🔁 Nova Compra Parcelada</div>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",marginBottom:12}}>
+      <Sel label="Cartão" value={cartaoId} onChange={setCartaoId} options={cartoes.map(c=>({value:c.id,label:`${c.nome} — ${c.banco}`}))} placeholder="Selecione o cartão" style={{minWidth:190}}/>
+      <Inp label="Descrição" value={descricao} onChange={setDescricao} placeholder="Ex: Geladeira Magalu" style={{flex:1,minWidth:180}}/>
+      <Inp label="Data da compra" type="date" value={data} onChange={setData} style={{minWidth:140}}/>
+    </div>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",marginBottom:12}}>
+      <div style={{display:"flex",flexDirection:"column",gap:4}}>
+        <label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>Valor informado é</label>
+        <div style={{display:"flex",background:C.surfaceAlt,borderRadius:10,border:`1.5px solid ${C.border}`,overflow:"hidden"}}>{[["total","Total"],["parcela","Da parcela"]].map(([k,l])=>(<button key={k} onClick={()=>setModo(k)} style={{padding:"8px 14px",border:"none",fontSize:13,fontWeight:700,cursor:"pointer",background:modo===k?C.purple:"transparent",color:modo===k?C.white:C.muted}}>{l}</button>))}</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:4}}>
+        <label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>Valor (R$)</label>
+        <MoneyInput value={valor} zeroVazio placeholder="0,00" onCommit={setValor} inputStyle={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:10,color:C.text,padding:"8px 13px",fontSize:13,width:130,textAlign:"right"}}/>
+      </div>
+      <Inp label="Nº de parcelas" type="number" value={nParc} onChange={setNParc} style={{width:110}}/>
+      <Inp label="Começar da parcela" type="number" value={parcIni} onChange={setParcIni} style={{width:130}}/>
+      <Sel label={ini>1?`Fatura da parcela ${ini}`:"Fatura da 1ª parcela"} value={mes} onChange={x=>setMes(Number(x))} options={MONTHS.map((m,i)=>({value:i,label:m}))} style={{minWidth:150}}/>
+      <Sel label="Ano" value={ano} onChange={x=>setAno(Number(x))} options={anos.map(a=>({value:a,label:String(a)}))} style={{minWidth:90}}/>
+    </div>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",marginBottom:12}}>
+      <div style={{display:"flex",flexDirection:"column",gap:4}}>
+        <label style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"}}>Categoria</label>
+        <CatSelect catId={catId} subId={subId} onCat={x=>{setCatId(x);setSubId("");}} onSub={setSubId} categorias={categorias} tipoFiltro="despesa"/>
+      </div>
+    </div>
+    {n>=2&&v>0&&qtdGerar>0&&<div style={{fontSize:12,color:C.textMid,marginBottom:12,fontWeight:600}}>
+      {n}x de <b>{fmt(vParc)}</b> (total {fmt(vTotal)}) · serão lançadas {qtdGerar} parcela{qtdGerar>1?"s":""}, de <b>{MONTHS[mes].slice(0,3)}/{ano}</b> até <b>{MONTHS[ultMes].slice(0,3)}/{ultAno}</b>
+    </div>}
+    {erro&&<div style={{fontSize:12,color:C.red,fontWeight:700,marginBottom:10}}>⚠️ {erro}</div>}
+    <div style={{display:"flex",gap:10}}><Btn onClick={salvar}>Lançar parcelas</Btn><Btn onClick={onClose} variant="ghost">Cancelar</Btn></div>
+  </Card>);
+}
+
 function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
   const anoAtual=new Date().getFullYear();
   const[mesSel,setMesSel]=useState(new Date().getMonth());
@@ -467,13 +539,28 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
   const[impMes,setImpMes]=useState(new Date().getMonth());
   const[impAno,setImpAno]=useState(anoAtual);
   const[msg,setMsg]=useState("");
+  const[showParc,setShowParc]=useState(false);
+
+  const salvarParcelada=(linhas)=>{
+    setFatura(p=>[...p,...linhas]);
+    const f=linhas[0],l=linhas[linhas.length-1];
+    setMsg(`✅ ${linhas.length} parcela${linhas.length>1?"s":""} lançada${linhas.length>1?"s":""} (${MONTHS[f.mes_fatura].slice(0,3)}/${f.ano_fatura} → ${MONTHS[l.mes_fatura].slice(0,3)}/${l.ano_fatura})`);
+    setShowParc(false);
+  };
 
   const handleImport=(csv)=>{
     if(!impCartao){setMsg("⚠️ Selecione o cartão antes de importar.");return false;}
     const novos=parseCSVLines(csv).map(e=>({...e,valor:-Math.abs(e.valor),cartaoId:impCartao,mes_fatura:impMes,ano_fatura:impAno}));
     if(!novos.length){setMsg("⚠️ Nenhuma linha reconhecida.");return false;}
-    setFatura(p=>[...p,...novos]);
-    setMsg(`✅ ${novos.length} lançamentos importados para ${MONTHS[impMes]}/${impAno}!`);
+    // Parcelas previstas desta fatura que aparecem no CSV são substituídas pela linha importada (mantendo a categoria)
+    const previstas=fatura.filter(e=>e.prevista&&e.cartaoId===impCartao&&e.mes_fatura===impMes&&e.ano_fatura===impAno);
+    const usadas=new Set();
+    novos.forEach(n=>{
+      const m=previstas.find(e=>!usadas.has(e.id)&&Math.abs(Math.abs(e.valor)-Math.abs(n.valor))<0.02);
+      if(m){usadas.add(m.id);if(!n.categoriaId){n.categoriaId=m.categoriaId;n.subcategoriaId=m.subcategoriaId;}n.grupoParcela=m.grupoParcela;n.parcela=m.parcela;n.totalParcelas=m.totalParcelas;}
+    });
+    setFatura(p=>[...p.filter(e=>!usadas.has(e.id)),...novos]);
+    setMsg(`✅ ${novos.length} lançamentos importados para ${MONTHS[impMes]}/${impAno}!${usadas.size?` ${usadas.size} parcela${usadas.size>1?"s":""} prevista${usadas.size>1?"s":""} substituída${usadas.size>1?"s":""} pelo CSV.`:""}`);
     setShowImp(false);
     return true;
   };
@@ -481,9 +568,19 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
   const addCartao=()=>{if(!nomeC.trim())return;setCartoes(p=>[...p,{id:Date.now().toString(),nome:nomeC.trim(),banco:bancoC}]);setNomeC("");setShowNovo(false);};
   const remCartao=id=>{setCartoes(p=>p.filter(c=>c.id!==id));setFatura(p=>p.filter(e=>e.cartaoId!==id));};
   const upd=(id,f,v)=>setFatura(p=>p.map(e=>e.id===id?{...e,[f]:f==="valor"?parseNum(v):v}:e));
-  const rem=id=>setFatura(p=>p.filter(e=>e.id!==id));
+  const rem=id=>{
+    const e=fatura.find(x=>x.id===id);
+    if(e&&e.grupoParcela){
+      const futuras=fatura.filter(x=>x.grupoParcela===e.grupoParcela&&x.id!==id&&(x.ano_fatura*12+x.mes_fatura)>(e.ano_fatura*12+e.mes_fatura));
+      if(futuras.length&&window.confirm(`Esta é a parcela ${e.parcela}/${e.totalParcelas}. Excluir também as ${futuras.length} parcela${futuras.length>1?"s":""} seguinte${futuras.length>1?"s":""}?\n\nOK = excluir esta e as seguintes\nCancelar = excluir só esta`)){
+        const ids=new Set([id,...futuras.map(x=>x.id)]);
+        return setFatura(p=>p.filter(x=>!ids.has(x.id)));
+      }
+    }
+    setFatura(p=>p.filter(x=>x.id!==id));
+  };
   const add=()=>setFatura(p=>[...p,{id:Date.now(),data:new Date().toISOString().split("T")[0],descricao:"",valor:0,categoriaId:filterCat&&filterCat!=="__sem__"?filterCat:"",subcategoriaId:filterSub&&filterSub!=="__sem__"?filterSub:"",cartaoId:cartaoSel!=="todos"?cartaoSel:"",mes_fatura:mesSel,ano_fatura:anoSel}]);
-  const anos=Array.from({length:3},(_,i)=>anoAtual-1+i);
+  const anos=useMemo(()=>{const maxA=Math.max(anoAtual+1,...fatura.map(e=>e.ano_fatura||0));return Array.from({length:maxA-anoAtual+2},(_,i)=>anoAtual-1+i);},[fatura,anoAtual]);
   const fatFiltrada=useMemo(()=>{
     let f=verTodos?fatura:fatura.filter(e=>e.mes_fatura===mesSel&&e.ano_fatura===anoSel);
     if(cartaoSel!=="todos")f=f.filter(e=>e.cartaoId===cartaoSel);
@@ -498,6 +595,10 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
   const subsDoFiltro=(categorias.find(c=>c.id===filterCat)||{}).subcategorias||[];
   const totalFat=fatFiltrada.reduce((s,e)=>s+Math.abs(e.valor),0);
   const semCat=fatFiltrada.filter(e=>!e.categoriaId).length;
+  const refSel=anoSel*12+mesSel;
+  const parcFuturas=fatura.filter(e=>e.grupoParcela&&(e.ano_fatura*12+e.mes_fatura)>refSel&&(cartaoSel==="todos"||e.cartaoId===cartaoSel));
+  const totalFuturo=parcFuturas.reduce((s,e)=>s+Math.abs(e.valor),0);
+  const proxFat=parcFuturas.filter(e=>(e.ano_fatura*12+e.mes_fatura)===refSel+1).reduce((s,e)=>s+Math.abs(e.valor),0);
   const resumoCartoes=cartoes.map(c=>{const linhas=(verTodos?fatura:fatura.filter(e=>e.mes_fatura===mesSel&&e.ano_fatura===anoSel)).filter(e=>e.cartaoId===c.id);return{...c,total:linhas.reduce((s,e)=>s+Math.abs(e.valor),0),qtd:linhas.length};});
 
   // Resumo por categoria + subcategoria da fatura filtrada
@@ -535,10 +636,12 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
       {(filterCat||cartaoSel!=="todos")&&<Btn onClick={()=>{setFilterCat("");setFilterSub("");setCartaoSel("todos");}} variant="ghost" style={{fontSize:11}}>✕ limpar filtros</Btn>}
       <Btn onClick={()=>{setShowImp(!showImp);setMsg("");}}>📥 Importar CSV</Btn>
       <Btn onClick={add} variant="ghost">+ Linha manual</Btn>
+      <Btn onClick={()=>{setShowParc(!showParc);setMsg("");}} variant="soft">🔁 Compra parcelada</Btn>
       <Btn onClick={()=>setShowNovo(!showNovo)} variant="soft">+ Novo cartão</Btn>
     </div>
     {showNovo&&(<Card style={{background:C.accentPale,border:`1.5px solid ${C.accentLight}`}}><div style={{fontSize:13,fontWeight:800,marginBottom:12}}>💳 Cadastrar Novo Cartão</div><div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}><Inp label="Nome do cartão" value={nomeC} onChange={setNomeC} placeholder="Ex: Nubank Principal" style={{flex:1,minWidth:160}}/><Sel label="Banco" value={bancoC} onChange={setBancoC} options={BANKS.map(b=>({value:b,label:b}))} style={{minWidth:150}}/><Btn onClick={addCartao}>Cadastrar</Btn><Btn onClick={()=>setShowNovo(false)} variant="ghost">Cancelar</Btn></div></Card>)}
     {msg&&<div style={{fontSize:12,padding:"8px 12px",borderRadius:8,fontWeight:600,background:msg.startsWith("✅")?C.greenPale:C.redPale,color:msg.startsWith("✅")?C.green:C.red}}>{msg}</div>}
+    {showParc&&(cartoes.length?<ParceladaForm cartoes={cartoes} categorias={categorias} mesIni={mesSel} anoIni={anoSel} cartaoIni={cartaoSel!=="todos"?cartaoSel:""} anos={Array.from({length:6},(_,i)=>anoAtual-1+i)} onSave={salvarParcelada} onClose={()=>setShowParc(false)}/>:<div style={{fontSize:12,color:C.red,fontWeight:700}}>⚠️ Cadastre um cartão primeiro.</div>)}
     {showImp&&<CsvImportBox
       titulo="📥 Importar Fatura do Cartão (CSV)"
       dica="Cole o CSV da fatura. O mês é definido abaixo — não pela data dos lançamentos."
@@ -556,6 +659,7 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
     <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
       <KPI icon="💸" label={verTodos?"Total Geral":`Fatura ${MONTHS[mesSel]}/${anoSel}`} value={fmt(totalFat)} color={C.red} sub={filterCat?`filtrado: ${filterCat==="__sem__"?"sem categoria":(categorias.find(c=>c.id===filterCat)||{}).nome||""}`:undefined}/>
       <KPI icon="🏷️" label="Sem categoria" value={semCat} color={semCat>0?C.yellow:C.green} sub={semCat>0?`${semCat} para categorizar`:"tudo categorizado ✓"}/>
+      {!verTodos&&<KPI icon="🔁" label="Parcelas futuras" value={fmt(totalFuturo)} color={C.purple} sub={totalFuturo>0?`${fmt(proxFat)} já na fatura de ${MONTHS[(mesSel+1)%12].slice(0,3)}`:"nenhuma parcela à frente"}/>}
     </div>
 
     {cartoes.length>0&&(<div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{resumoCartoes.map(c=>{const bc=BANK_COLORS[c.banco]||C.accent;return(<div key={c.id} style={{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:14,padding:"14px 18px",flex:1,minWidth:160,position:"relative",overflow:"hidden"}}><div style={{position:"absolute",top:0,left:0,right:0,height:4,background:bc}}/><div style={{fontSize:10.5,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",marginBottom:4}}>{c.banco}</div><div style={{fontSize:13,fontWeight:800,marginBottom:6}}>{c.nome}</div><div style={{fontSize:20,fontFamily:"'DM Mono',monospace",fontWeight:800,color:C.red}}>{fmt(c.total)}</div><div style={{fontSize:11,color:C.muted,marginTop:3}}>{c.qtd} lançamentos</div><button onClick={()=>remCartao(c.id)} style={{position:"absolute",top:10,right:10,background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13}}>✕</button></div>);})}</div>)}
@@ -598,7 +702,7 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
       <div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th>Cartão</th><th>Fatura</th><th>Categoria</th><th></th></tr></thead>
       <tbody>
         {fatFiltrada.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:C.muted,padding:32}}>Nenhum lançamento. Importe um CSV ou adicione manualmente.</td></tr>}
-        {fatFiltrada.map(e=>{const cart=cartoes.find(c=>c.id===e.cartaoId);const bc=BANK_COLORS[cart?.banco]||C.accent;return(<tr key={e.id}><td><input type="date" value={e.data||""} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td><td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/></td><td><MoneyInput value={e.valor} onCommit={v=>upd(e.id,"valor",v)} inputStyle={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:e.valor>=0?C.green:C.red,fontSize:13,fontWeight:700,width:118,padding:"5px 9px",textAlign:"right"}}/></td><td>{cart?<Badge color={bc}>{cart.nome}</Badge>:<select value={e.cartaoId||""} onChange={ev=>upd(e.id,"cartaoId",ev.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.muted,padding:"3px 8px",fontSize:12,outline:"none"}}><option value="">— cartão —</option>{cartoes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select>}</td><td style={{fontSize:11,color:C.purple,fontWeight:700,whiteSpace:"nowrap"}}>{e.mes_fatura!==undefined?`${MONTHS[e.mes_fatura].slice(0,3)}/${e.ano_fatura}`:"—"}</td><td><CatSelect catId={e.categoriaId} subId={e.subcategoriaId||""} onCat={v=>upd(e.id,"categoriaId",v)} onSub={v=>upd(e.id,"subcategoriaId",v)} categorias={categorias} tipoFiltro="despesa"/></td><td><button onClick={()=>rem(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button></td></tr>);})}
+        {fatFiltrada.map(e=>{const cart=cartoes.find(c=>c.id===e.cartaoId);const bc=BANK_COLORS[cart?.banco]||C.accent;return(<tr key={e.id}><td><input type="date" value={e.data||""} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td><td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/>{e.prevista&&<Badge color={C.purple}>prevista</Badge>}</td><td><MoneyInput value={e.valor} onCommit={v=>upd(e.id,"valor",v)} inputStyle={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:e.valor>=0?C.green:C.red,fontSize:13,fontWeight:700,width:118,padding:"5px 9px",textAlign:"right"}}/></td><td>{cart?<Badge color={bc}>{cart.nome}</Badge>:<select value={e.cartaoId||""} onChange={ev=>upd(e.id,"cartaoId",ev.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.muted,padding:"3px 8px",fontSize:12,outline:"none"}}><option value="">— cartão —</option>{cartoes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select>}</td><td style={{fontSize:11,color:C.purple,fontWeight:700,whiteSpace:"nowrap"}}>{e.mes_fatura!==undefined?`${MONTHS[e.mes_fatura].slice(0,3)}/${e.ano_fatura}`:"—"}</td><td><CatSelect catId={e.categoriaId} subId={e.subcategoriaId||""} onCat={v=>upd(e.id,"categoriaId",v)} onSub={v=>upd(e.id,"subcategoriaId",v)} categorias={categorias} tipoFiltro="despesa"/></td><td><button onClick={()=>rem(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button></td></tr>);})}
       </tbody></table></div>
     </Card>
   </div>);
@@ -840,7 +944,7 @@ function App(){
       <div className="topbar" style={{maxWidth:1280,margin:"0 auto",padding:"0 24px",display:"flex",alignItems:"center",gap:20}}>
         <div style={{padding:"14px 0",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
           <div style={{width:32,height:32,borderRadius:10,background:`linear-gradient(135deg,${C.accent},${C.accentLight})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,boxShadow:`0 2px 8px ${C.accent}44`}}>🌸</div>
-          <div><div style={{fontWeight:800,fontSize:14,color:C.text,lineHeight:1.1}}>Meu Financeiro</div><div style={{fontSize:10,color:C.muted,fontWeight:600}}>{ano} · v3</div></div>
+          <div><div style={{fontWeight:800,fontSize:14,color:C.text,lineHeight:1.1}}>Meu Financeiro</div><div style={{fontSize:10,color:C.muted,fontWeight:600}}>{ano} · v4</div></div>
         </div>
         <nav style={{display:"flex",flex:1,overflowX:"auto"}}>
           {TABS.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{background:"none",border:"none",padding:"16px 14px",color:tab===t.id?C.accent:C.muted,borderBottom:`2.5px solid ${tab===t.id?C.accent:"transparent"}`,fontWeight:tab===t.id?800:600,fontSize:13,cursor:"pointer",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
