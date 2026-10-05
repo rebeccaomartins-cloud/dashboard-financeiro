@@ -523,6 +523,36 @@ function ParceladaForm({cartoes,categorias,mesIni,anoIni,cartaoIni,anos,onSave,o
   </Card>);
 }
 
+// ── Detalhe de uma compra parcelada (escopo de módulo) ────────────────────
+function ParcelaDetalhe({linha,fatura,refSel,cols}){
+  const grupo=fatura.filter(x=>x.grupoParcela===linha.grupoParcela).sort((a,b)=>(a.parcela||0)-(b.parcela||0));
+  const n=linha.totalParcelas||grupo.length;
+  const somaConhecida=grupo.reduce((s,x)=>s+Math.abs(x.valor),0);
+  const media=grupo.length?somaConhecida/grupo.length:0;
+  const faltando=Math.max(n-grupo.length,0); // parcelas anteriores não cadastradas
+  const total=somaConhecida+faltando*media;
+  const ref=x=>x.ano_fatura*12+x.mes_fatura;
+  const pagas=grupo.filter(x=>ref(x)<=refSel);
+  const restantes=grupo.filter(x=>ref(x)>refSel);
+  const valorPago=pagas.reduce((s,x)=>s+Math.abs(x.valor),0)+faltando*media;
+  const valorRest=restantes.reduce((s,x)=>s+Math.abs(x.valor),0);
+  const nome=(linha.descricao||"").replace(/\s*\(\d+\/\d+\)\s*$/,"");
+  const pct=total>0?valorPago/total*100:0;
+  const lbl={fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em"};
+  const val={fontSize:16,fontWeight:800,fontFamily:"'DM Mono',monospace"};
+  return(<tr><td colSpan={cols} style={{background:C.purplePale,padding:"14px 18px"}}>
+    <div style={{fontSize:13,fontWeight:800,marginBottom:10}}>🔁 {nome} <span style={{color:C.muted,fontWeight:600}}>· {n}x de {fmt(media)}</span></div>
+    <div style={{display:"flex",gap:22,flexWrap:"wrap",marginBottom:10}}>
+      <div><div style={lbl}>Total da compra</div><div style={{...val,color:C.text}}>{fmt(total)}</div></div>
+      <div><div style={lbl}>Até esta fatura</div><div style={{...val,color:C.textMid}}>{fmt(valorPago)}</div><div style={{fontSize:11,color:C.muted}}>{pagas.length+faltando} de {n} parcelas</div></div>
+      <div><div style={lbl}>Ainda falta</div><div style={{...val,color:C.purple}}>{fmt(valorRest)}</div><div style={{fontSize:11,color:C.muted}}>{restantes.length} parcela{restantes.length!==1?"s":""}</div></div>
+    </div>
+    <div style={{maxWidth:420,marginBottom:10}}><ProgressBar value={pct} max={100} color={C.purple}/></div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{grupo.map(x=>{const futura=ref(x)>refSel;const atual=x.id===linha.id;return(<span key={x.id} style={{fontSize:11,padding:"3px 8px",borderRadius:8,fontWeight:700,whiteSpace:"nowrap",background:atual?C.purple:futura?C.surface:C.purple+"22",color:atual?C.white:futura?C.muted:C.purple,border:`1px solid ${C.purple}44`}}>{x.parcela}/{n} · {MONTHS[x.mes_fatura].slice(0,3)}/{String(x.ano_fatura).slice(2)} · {fmt(Math.abs(x.valor))}</span>);})}</div>
+    {faltando>0&&<div style={{fontSize:11,color:C.muted,marginTop:8}}>* {faltando} parcela{faltando>1?"s":""} anterior{faltando>1?"es":""} não cadastrada{faltando>1?"s":""} — estimada{faltando>1?"s":""} pelo valor médio.</div>}
+  </td></tr>);
+}
+
 function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
   const anoAtual=new Date().getFullYear();
   const[mesSel,setMesSel]=useState(new Date().getMonth());
@@ -540,6 +570,7 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
   const[impAno,setImpAno]=useState(anoAtual);
   const[msg,setMsg]=useState("");
   const[showParc,setShowParc]=useState(false);
+  const[abertaId,setAbertaId]=useState(null);
 
   const salvarParcelada=(linhas)=>{
     setFatura(p=>[...p,...linhas]);
@@ -702,7 +733,7 @@ function TabCartao({fatura,setFatura,categorias,cartoes,setCartoes}){
       <div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Descrição</th><th>Valor</th><th>Cartão</th><th>Fatura</th><th>Categoria</th><th></th></tr></thead>
       <tbody>
         {fatFiltrada.length===0&&<tr><td colSpan={7} style={{textAlign:"center",color:C.muted,padding:32}}>Nenhum lançamento. Importe um CSV ou adicione manualmente.</td></tr>}
-        {fatFiltrada.map(e=>{const cart=cartoes.find(c=>c.id===e.cartaoId);const bc=BANK_COLORS[cart?.banco]||C.accent;return(<tr key={e.id}><td><input type="date" value={e.data||""} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td><td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/>{e.prevista&&<Badge color={C.purple}>prevista</Badge>}</td><td><MoneyInput value={e.valor} onCommit={v=>upd(e.id,"valor",v)} inputStyle={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:e.valor>=0?C.green:C.red,fontSize:13,fontWeight:700,width:118,padding:"5px 9px",textAlign:"right"}}/></td><td>{cart?<Badge color={bc}>{cart.nome}</Badge>:<select value={e.cartaoId||""} onChange={ev=>upd(e.id,"cartaoId",ev.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.muted,padding:"3px 8px",fontSize:12,outline:"none"}}><option value="">— cartão —</option>{cartoes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select>}</td><td style={{fontSize:11,color:C.purple,fontWeight:700,whiteSpace:"nowrap"}}>{e.mes_fatura!==undefined?`${MONTHS[e.mes_fatura].slice(0,3)}/${e.ano_fatura}`:"—"}</td><td><CatSelect catId={e.categoriaId} subId={e.subcategoriaId||""} onCat={v=>upd(e.id,"categoriaId",v)} onSub={v=>upd(e.id,"subcategoriaId",v)} categorias={categorias} tipoFiltro="despesa"/></td><td><button onClick={()=>rem(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button></td></tr>);})}
+        {fatFiltrada.map(e=>{const cart=cartoes.find(c=>c.id===e.cartaoId);const bc=BANK_COLORS[cart?.banco]||C.accent;const aberta=abertaId===e.id;return(<React.Fragment key={e.id}><tr style={aberta?{background:C.purplePale}:undefined}><td><input type="date" value={e.data||""} onChange={ev=>upd(e.id,"data",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,cursor:"pointer"}}/></td><td><input value={e.descricao} onChange={ev=>upd(e.id,"descricao",ev.target.value)} style={{background:"transparent",border:"none",color:C.text,fontSize:13,width:"100%",outline:"none",fontWeight:500}}/><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{e.grupoParcela&&<button onClick={()=>setAbertaId(aberta?null:e.id)} title="Ver total da compra parcelada" style={{background:aberta?C.purple:C.purplePale,color:aberta?C.white:C.purple,border:`1px solid ${C.purple}55`,borderRadius:99,padding:"2px 9px",fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>🔁 {e.parcela}/{e.totalParcelas} {aberta?"▲":"▼"}</button>}{e.prevista&&<Badge color={C.purple}>prevista</Badge>}</div></td><td><MoneyInput value={e.valor} onCommit={v=>upd(e.id,"valor",v)} inputStyle={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:e.valor>=0?C.green:C.red,fontSize:13,fontWeight:700,width:118,padding:"5px 9px",textAlign:"right"}}/></td><td>{cart?<Badge color={bc}>{cart.nome}</Badge>:<select value={e.cartaoId||""} onChange={ev=>upd(e.id,"cartaoId",ev.target.value)} style={{background:C.surfaceAlt,border:`1.5px solid ${C.border}`,borderRadius:8,color:C.muted,padding:"3px 8px",fontSize:12,outline:"none"}}><option value="">— cartão —</option>{cartoes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}</select>}</td><td style={{fontSize:11,color:C.purple,fontWeight:700,whiteSpace:"nowrap"}}>{e.mes_fatura!==undefined?`${MONTHS[e.mes_fatura].slice(0,3)}/${e.ano_fatura}`:"—"}</td><td><CatSelect catId={e.categoriaId} subId={e.subcategoriaId||""} onCat={v=>upd(e.id,"categoriaId",v)} onSub={v=>upd(e.id,"subcategoriaId",v)} categorias={categorias} tipoFiltro="despesa"/></td><td><button onClick={()=>rem(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button></td></tr>{aberta&&e.grupoParcela&&<ParcelaDetalhe linha={e} fatura={fatura} refSel={verTodos?(e.ano_fatura*12+e.mes_fatura):refSel} cols={7}/>}</React.Fragment>);})}
       </tbody></table></div>
     </Card>
   </div>);
@@ -944,7 +975,7 @@ function App(){
       <div className="topbar" style={{maxWidth:1280,margin:"0 auto",padding:"0 24px",display:"flex",alignItems:"center",gap:20}}>
         <div style={{padding:"14px 0",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
           <div style={{width:32,height:32,borderRadius:10,background:`linear-gradient(135deg,${C.accent},${C.accentLight})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,boxShadow:`0 2px 8px ${C.accent}44`}}>🌸</div>
-          <div><div style={{fontWeight:800,fontSize:14,color:C.text,lineHeight:1.1}}>Meu Financeiro</div><div style={{fontSize:10,color:C.muted,fontWeight:600}}>{ano} · v4</div></div>
+          <div><div style={{fontWeight:800,fontSize:14,color:C.text,lineHeight:1.1}}>Meu Financeiro</div><div style={{fontSize:10,color:C.muted,fontWeight:600}}>{ano} · v5</div></div>
         </div>
         <nav style={{display:"flex",flex:1,overflowX:"auto"}}>
           {TABS.map(t=>(<button key={t.id} onClick={()=>setTab(t.id)} style={{background:"none",border:"none",padding:"16px 14px",color:tab===t.id?C.accent:C.muted,borderBottom:`2.5px solid ${tab===t.id?C.accent:"transparent"}`,fontWeight:tab===t.id?800:600,fontSize:13,cursor:"pointer",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
